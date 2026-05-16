@@ -35,6 +35,9 @@ func NewJSONStore(dataDir string) (*JSONStore, error) {
 	if err := s.loadSettings(); err != nil {
 		return nil, err
 	}
+	if err := s.pruneLoadedResults(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -54,6 +57,21 @@ func (s *JSONStore) UpdateGroups(update func([]proxy.Group) ([]proxy.Group, erro
 	return s.saveGroupsLocked(nextGroups)
 }
 
+func (s *JSONStore) UpdateGroupsAndClearResults(update func([]proxy.Group) ([]proxy.Group, []string, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	nextGroups, clearIDs, err := update(cloneGroups(s.groups))
+	if err != nil {
+		return err
+	}
+	nextResults := cloneResults(s.results)
+	for _, id := range clearIDs {
+		delete(nextResults, id)
+	}
+	nextResults = keepExistingResults(nextResults, nextGroups)
+	return s.saveGroupsAndResultsLocked(nextGroups, nextResults)
+}
+
 func (s *JSONStore) SaveGroups(groups []proxy.Group) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,13 +81,19 @@ func (s *JSONStore) SaveGroups(groups []proxy.Group) error {
 func (s *JSONStore) saveGroupsLocked(groups []proxy.Group) error {
 	nextGroups := cloneGroups(groups)
 	nextResults := keepExistingResults(s.results, nextGroups)
-	if err := writeJSON(s.path("groups.json"), nextGroups); err != nil {
-		return err
-	}
-	if len(nextResults) != len(s.results) {
+	return s.saveGroupsAndResultsLocked(nextGroups, nextResults)
+}
+
+func (s *JSONStore) saveGroupsAndResultsLocked(groups []proxy.Group, results map[string]proxy.ProxyResult) error {
+	nextGroups := cloneGroups(groups)
+	nextResults := cloneResults(results)
+	if !sameResultIDs(nextResults, s.results) {
 		if err := writeJSON(s.path("results.json"), nextResults); err != nil {
 			return err
 		}
+	}
+	if err := writeJSON(s.path("groups.json"), nextGroups); err != nil {
+		return err
 	}
 	s.groups = nextGroups
 	s.results = nextResults
@@ -177,6 +201,18 @@ func (s *JSONStore) loadSettings() error {
 	return s.settings.Validate()
 }
 
+func (s *JSONStore) pruneLoadedResults() error {
+	pruned := keepExistingResults(s.results, s.groups)
+	if sameResultIDs(pruned, s.results) {
+		return nil
+	}
+	if err := writeJSON(s.path("results.json"), pruned); err != nil {
+		return err
+	}
+	s.results = pruned
+	return nil
+}
+
 func (s *JSONStore) path(name string) string {
 	return filepath.Join(s.dataDir, name)
 }
@@ -249,4 +285,16 @@ func cloneResults(results map[string]proxy.ProxyResult) map[string]proxy.ProxyRe
 		out[id] = result
 	}
 	return out
+}
+
+func sameResultIDs(a, b map[string]proxy.ProxyResult) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for id := range a {
+		if _, ok := b[id]; !ok {
+			return false
+		}
+	}
+	return true
 }

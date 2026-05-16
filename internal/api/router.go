@@ -360,37 +360,31 @@ func (s *Server) updateProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rawChanged := false
 	var current proxy.Proxy
-	if err := s.store.UpdateGroups(func(groups []proxy.Group) ([]proxy.Group, error) {
+	if err := s.store.UpdateGroupsAndClearResults(func(groups []proxy.Group) ([]proxy.Group, []string, error) {
 		gi, pi := proxyIndex(groups, r.PathValue("id"), r.PathValue("pid"))
 		if gi < 0 {
-			return nil, errGroupNotFound
+			return nil, nil, errGroupNotFound
 		}
 		if pi < 0 {
-			return nil, errProxyNotFound
+			return nil, nil, errProxyNotFound
 		}
 		current = groups[gi].Proxies[pi]
+		clearIDs := []string(nil)
 		if body.Raw != nil && strings.TrimSpace(*body.Raw) != current.Raw {
 			parsedRaw.ID = current.ID
 			parsedRaw.Label = current.Label
 			current = parsedRaw
-			rawChanged = true
+			clearIDs = append(clearIDs, current.ID)
 		}
 		if body.Label != nil {
 			current.Label = strings.TrimSpace(*body.Label)
 		}
 		groups[gi].Proxies[pi] = current
-		return groups, nil
+		return groups, clearIDs, nil
 	}); err != nil {
 		writeStoreMutationError(w, err)
 		return
-	}
-	if rawChanged {
-		if err := s.store.ClearResults(current.ID); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
 	}
 	writeJSON(w, http.StatusOK, current)
 }
@@ -571,25 +565,11 @@ func (s *Server) groupByID(id string) ([]proxy.Group, int, error) {
 	if err != nil {
 		return nil, -1, err
 	}
-	for i := range groups {
-		if groups[i].ID == id {
-			return groups, i, nil
-		}
+	idx := groupIndex(groups, id)
+	if idx < 0 {
+		return nil, -1, errGroupNotFound
 	}
-	return nil, -1, errors.New("group not found")
-}
-
-func (s *Server) proxyByID(groupID, proxyID string) ([]proxy.Group, int, int, error) {
-	groups, gi, err := s.groupByID(groupID)
-	if err != nil {
-		return nil, -1, -1, err
-	}
-	for i := range groups[gi].Proxies {
-		if groups[gi].Proxies[i].ID == proxyID {
-			return groups, gi, i, nil
-		}
-	}
-	return nil, -1, -1, errors.New("proxy not found")
+	return groups, idx, nil
 }
 
 func groupIndex(groups []proxy.Group, groupID string) int {
