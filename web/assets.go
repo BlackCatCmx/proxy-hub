@@ -2,5 +2,5 @@ package web
 
 import "embed"
 
-//go:embed index.html login.html app.js app.css vendor/alpine.min.js
+//go:embed index.html login.html app.js app.css
 var FS embed.FS

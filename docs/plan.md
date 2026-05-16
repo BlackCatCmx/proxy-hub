@@ -9,7 +9,7 @@ Go 单体二进制；SOCKS5 代理延迟测试与 IP 回显测试分离；带鉴
 | 维度 | 选型 | 理由 |
 |------|------|------|
 | 后端 | Go 1.26，`net/http` 标准库 ServeMux（`GET /path/{id}` 模式自 1.22 起原生支持） | 轻量，无 cgo，无第三方路由依赖 |
-| 前端 | 原生 HTML/CSS/JS + Alpine.js 本地文件 | 无构建；不依赖外部 CDN；可随 `embed.FS` 进入单二进制 |
+| 前端 | 原生 HTML/CSS/JS，无运行时框架 | 无构建；不依赖外部 CDN；随 `embed.FS` 进入单二进制 |
 | 资源嵌入 | `embed.FS` | 单二进制部署 |
 | 存储 | JSON 文件 + 进程内 RWMutex；写入用临时文件 + rename 原子替换 | `/data` 体量小、读多写少；不引入 SQLite |
 | 鉴权 | Cookie + HMAC token（包含 `sha256(ADMIN_KEY)` 前缀）；服务启动期计算基准 hash | 登录长期有效；`ADMIN_KEY` 变更后旧 cookie 失效 |
@@ -21,7 +21,7 @@ Go 单体二进制；SOCKS5 代理延迟测试与 IP 回显测试分离；带鉴
 
 - 后端优先只使用 Go 标准库；非必要不引入第三方 Go 模块。
 - 如引入第三方 Go 模块，必须提交 `go.mod` 与 `go.sum`，构建使用 `go mod download`/`go build` 的校验机制。
-- 前端不使用 npm 构建链，不提交 `package.json`；Alpine.js 作为固定版本文件放入 `web/vendor/alpine.min.js` 并随二进制嵌入。
+- 前端不使用 npm 构建链，不提交 `package.json`；不引入运行时框架，所有交互由 `web/app.js` 原生实现并随二进制嵌入。
 - 不从 CDN 动态加载运行时代码，避免运行时供应链变化。
 - Docker 基础镜像固定到明确版本；发布前可进一步固定 digest。
 - 禁止在 Zeabur 构建阶段执行未锁定版本的安装命令，例如 `npm install`、`go get latest`。
@@ -68,8 +68,7 @@ proxy-hub/
 │   ├── index.html
 │   ├── login.html
 │   ├── app.js
-│   ├── app.css
-│   └── vendor/alpine.min.js
+│   └── app.css
 ├── docs/plan.md
 ├── Dockerfile                      # 多阶段，distroless
 └── go.mod

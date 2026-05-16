@@ -132,16 +132,37 @@
   }
 
   function renderSummary() {
+    const box = $("#summary");
+    box.innerHTML = "";
     const group = currentGroup();
     if (!group) {
-      $("#summary").textContent = "暂无分组";
+      const chip = document.createElement("span");
+      chip.className = "chip empty";
+      chip.textContent = "暂无分组";
+      box.appendChild(chip);
       return;
     }
     const values = Object.values(state.results);
     const latencyOK = values.filter((item) => item.latency?.ok).length;
     const latencyFail = values.filter((item) => item.latency && !item.latency.ok).length;
     const latest = latestTestTime(values);
-    $("#summary").textContent = `当前分组: ${group.name}  代理: ${group.proxies.length}  选中: ${state.selected.size}  延迟成功: ${latencyOK}  延迟失败: ${latencyFail}  最近测试: ${latest || "—"}`;
+    const entries = [
+      ["当前分组", group.name],
+      ["代理", group.proxies.length],
+      ["选中", state.selected.size],
+      ["延迟成功", latencyOK],
+      ["延迟失败", latencyFail],
+      ["最近测试", latest || "—"]
+    ];
+    for (const [label, value] of entries) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.append(label + " ");
+      const strong = document.createElement("strong");
+      strong.textContent = String(value);
+      chip.appendChild(strong);
+      box.appendChild(chip);
+    }
   }
 
   function renderRows() {
@@ -151,7 +172,8 @@
     $("#selectAll").checked = Boolean(group?.proxies.length) && group.proxies.every((p) => state.selected.has(p.id));
     if (!group || group.proxies.length === 0) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td colspan="8" class="muted">暂无代理</td>`;
+      tr.className = "empty";
+      tr.innerHTML = `<td colspan="8">暂无代理</td>`;
       tbody.appendChild(tr);
       return;
     }
