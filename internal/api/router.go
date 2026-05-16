@@ -1,0 +1,617 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"proxy-hub/internal/auth"
+	"proxy-hub/internal/config"
+	"proxy-hub/internal/idgen"
+	"proxy-hub/internal/logbuf"
+	"proxy-hub/internal/proxy"
+	"proxy-hub/internal/store"
+	"proxy-hub/internal/tester"
+	"proxy-hub/internal/version"
+)
+
+type Server struct {
+	store             store.Store
+	auth              *auth.Service
+	limiter           *auth.LoginLimiter
+	tester            *tester.Tester
+	jobs              *tester.Manager
+	logger            *logbuf.Logger
+	static            fs.FS
+	dataDir           string
+	trustProxyHeaders bool
+}
+
+func NewServer(store store.Store, authService *auth.Service, limiter *auth.LoginLimiter, singleTester *tester.Tester, jobs *tester.Manager, logger *logbuf.Logger, static fs.FS, dataDir string, trustProxyHeaders bool) *Server {
+	return &Server{
+		store:             store,
+		auth:              authService,
+		limiter:           limiter,
+		tester:            singleTester,
+		jobs:              jobs,
+		logger:            logger,
+		static:            static,
+		dataDir:           dataDir,
+		trustProxyHeaders: trustProxyHeaders,
+	}
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("POST /api/auth/login", s.login)
+	mux.HandleFunc("POST /api/auth/logout", s.logout)
+	mux.Handle("GET /api/me", s.protected(s.me))
+
+	mux.Handle("GET /api/groups", s.protected(s.listGroups))
+	mux.Handle("POST /api/groups", s.protected(s.createGroup))
+	mux.Handle("PATCH /api/groups/{id}", s.protected(s.renameGroup))
+	mux.Handle("DELETE /api/groups/{id}", s.protected(s.deleteGroup))
+	mux.Handle("POST /api/groups/{id}/proxies", s.protected(s.addProxy))
+	mux.Handle("POST /api/groups/{id}/proxies/bulk", s.protected(s.bulkProxies))
+	mux.Handle("PATCH /api/groups/{id}/proxies/{pid}", s.protected(s.updateProxy))
+	mux.Handle("DELETE /api/groups/{id}/proxies/{pid}", s.protected(s.deleteProxy))
+	mux.Handle("GET /api/groups/{id}/export", s.protected(s.exportGroup))
+
+	mux.Handle("POST /api/test/jobs", s.protected(s.createJob))
+	mux.Handle("GET /api/test/jobs/{id}/stream", s.protected(s.streamJob))
+	mux.Handle("POST /api/test/one", s.protected(s.testOne))
+	mux.Handle("GET /api/results", s.protected(s.results))
+
+	mux.Handle("GET /api/settings", s.protected(s.getSettings))
+	mux.Handle("PUT /api/settings", s.protected(s.saveSettings))
+	mux.Handle("GET /api/logs", s.protected(s.logs))
+	mux.Handle("GET /api/logs/stream", s.protected(s.streamLogs))
+
+	mux.HandleFunc("GET /", s.staticFile)
+	return mux
+}
+
+func (s *Server) protected(h http.HandlerFunc) http.Handler {
+	return s.auth.Middleware(h)
+}
+
+func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "true", "version": version.Version})
+}
+
+func (s *Server) staticFile(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	if path == "" {
+		path = "index.html"
+	}
+	if path == "index.html" && !s.auth.Authenticated(r) {
+		w.Header().Set("Location", "./login.html")
+		w.WriteHeader(http.StatusFound)
+		return
+	}
+	http.FileServer(http.FS(s.static)).ServeHTTP(w, r)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Key string `json:"key"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	ip := auth.ClientIP(r, s.trustProxyHeaders)
+	if !s.limiter.Allow(ip) {
+		writeError(w, http.StatusTooManyRequests, errors.New("too many login attempts"))
+		return
+	}
+	if !s.auth.CheckKey(body.Key) {
+		s.limiter.Fail(ip)
+		writeError(w, http.StatusUnauthorized, errors.New("invalid admin key"))
+		return
+	}
+	s.limiter.Success(ip)
+	if err := s.auth.SetLoginCookie(w, r); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.logger.Info("login succeeded", map[string]string{"ip": ip})
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	s.auth.ClearLoginCookie(w, r)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) me(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) listGroups(w http.ResponseWriter, _ *http.Request) {
+	groups, err := s.store.Groups()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, groups)
+}
+
+func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	groups, err := s.store.Groups()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	id, err := idgen.New()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	groups = append(groups, proxy.Group{ID: id, Name: name, Created: time.Now(), Proxies: []proxy.Proxy{}})
+	if err := s.store.SaveGroups(groups); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, groups[len(groups)-1])
+}
+
+func (s *Server) renameGroup(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	groups, idx, err := s.groupByID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	groups[idx].Name = name
+	if err := s.store.SaveGroups(groups); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, groups[idx])
+}
+
+func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
+	groups, idx, err := s.groupByID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	groups = append(groups[:idx], groups[idx+1:]...)
+	if err := s.store.SaveGroups(groups); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) addProxy(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Raw string `json:"raw"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	p, err := proxy.Parse(body.Raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := assignID(&p); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	groups, idx, err := s.groupByID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	for _, existing := range groups[idx].Proxies {
+		if existing.DedupKey() == p.DedupKey() {
+			writeError(w, http.StatusConflict, errors.New("proxy already exists in this group"))
+			return
+		}
+	}
+	groups[idx].Proxies = append(groups[idx].Proxies, p)
+	if err := s.store.SaveGroups(groups); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, p)
+}
+
+func (s *Server) bulkProxies(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Text string `json:"text"`
+		Mode string `json:"mode"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.Mode != "replace" && body.Mode != "append" {
+		writeError(w, http.StatusBadRequest, errors.New("mode must be replace or append"))
+		return
+	}
+	parsed, parseErrors := proxy.ParseLines(body.Text)
+	unique := make([]proxy.Proxy, 0, len(parsed))
+	seen := make(map[string]struct{})
+	for _, p := range parsed {
+		if _, ok := seen[p.DedupKey()]; ok {
+			continue
+		}
+		seen[p.DedupKey()] = struct{}{}
+		if err := assignID(&p); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		unique = append(unique, p)
+	}
+	groups, idx, err := s.groupByID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	imported := 0
+	skipped := 0
+	if body.Mode == "replace" {
+		groups[idx].Proxies = unique
+		imported = len(unique)
+	} else {
+		existing := make(map[string]struct{}, len(groups[idx].Proxies))
+		for _, p := range groups[idx].Proxies {
+			existing[p.DedupKey()] = struct{}{}
+		}
+		for _, p := range unique {
+			if _, ok := existing[p.DedupKey()]; ok {
+				skipped++
+				continue
+			}
+			existing[p.DedupKey()] = struct{}{}
+			groups[idx].Proxies = append(groups[idx].Proxies, p)
+			imported++
+		}
+	}
+	if err := s.store.SaveGroups(groups); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"group":              groups[idx],
+		"imported":           imported,
+		"skipped_duplicates": skipped,
+		"errors":             parseErrors,
+	})
+}
+
+func (s *Server) updateProxy(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Label *string `json:"label"`
+		Raw   *string `json:"raw"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	groups, gi, pi, err := s.proxyByID(r.PathValue("id"), r.PathValue("pid"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	current := groups[gi].Proxies[pi]
+	rawChanged := false
+	if body.Raw != nil && strings.TrimSpace(*body.Raw) != current.Raw {
+		parsed, err := proxy.Parse(*body.Raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		parsed.ID = current.ID
+		parsed.Label = current.Label
+		current = parsed
+		rawChanged = true
+	}
+	if body.Label != nil {
+		current.Label = strings.TrimSpace(*body.Label)
+	}
+	groups[gi].Proxies[pi] = current
+	if err := s.store.SaveGroups(groups); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if rawChanged {
+		if err := s.store.ClearResults(current.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, current)
+}
+
+func (s *Server) deleteProxy(w http.ResponseWriter, r *http.Request) {
+	groups, gi, pi, err := s.proxyByID(r.PathValue("id"), r.PathValue("pid"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	groups[gi].Proxies = append(groups[gi].Proxies[:pi], groups[gi].Proxies[pi+1:]...)
+	if err := s.store.SaveGroups(groups); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) exportGroup(w http.ResponseWriter, r *http.Request) {
+	groups, idx, err := s.groupByID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	var lines []string
+	for _, p := range groups[idx].Proxies {
+		lines = append(lines, p.Raw)
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+safeFilename(groups[idx].Name)+".txt\"")
+	_, _ = w.Write([]byte(strings.Join(lines, "\n")))
+}
+
+func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Kind     tester.JobKind `json:"kind"`
+		GroupID  string         `json:"group_id"`
+		ProxyIDs []string       `json:"proxy_ids"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	job, err := s.jobs.Create(body.Kind, body.GroupID, body.ProxyIDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"job_id": job.ID, "job": job})
+}
+
+func (s *Server) streamJob(w http.ResponseWriter, r *http.Request) {
+	ch, err := s.jobs.Subscribe(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	defer s.jobs.Unsubscribe(r.PathValue("id"), ch)
+	streamSSE(w, r, ch)
+}
+
+func (s *Server) testOne(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Kind tester.JobKind `json:"kind"`
+		Raw  string         `json:"raw"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	p, err := proxy.Parse(body.Raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	settings, err := s.store.Settings()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	switch body.Kind {
+	case tester.JobLatency:
+		result := s.tester.Latency(r.Context(), p, settings)
+		writeJSON(w, http.StatusOK, proxy.ProxyResult{ProxyID: "instant", Latency: &result})
+	case tester.JobEcho:
+		result := s.tester.Echo(r.Context(), p, settings)
+		writeJSON(w, http.StatusOK, proxy.ProxyResult{ProxyID: "instant", Echo: &result})
+	default:
+		writeError(w, http.StatusBadRequest, errors.New("invalid test kind"))
+	}
+}
+
+func (s *Server) results(w http.ResponseWriter, r *http.Request) {
+	results, err := s.store.Results()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	groupID := r.URL.Query().Get("group_id")
+	if groupID == "" {
+		writeJSON(w, http.StatusOK, results)
+		return
+	}
+	groups, idx, err := s.groupByID(groupID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	filtered := make(map[string]proxy.ProxyResult)
+	for _, p := range groups[idx].Proxies {
+		if result, ok := results[p.ID]; ok {
+			filtered[p.ID] = result
+		}
+	}
+	writeJSON(w, http.StatusOK, filtered)
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
+	settings, err := s.store.Settings()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
+	var settings config.Settings
+	if err := readJSON(r, &settings); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	settings.FillDefaults()
+	if err := settings.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.SaveSettings(settings); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.configureLogger(settings); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if value := r.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		limit = parsed
+	}
+	writeJSON(w, http.StatusOK, s.logger.Recent(limit))
+}
+
+func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
+	ch := s.logger.Subscribe()
+	defer s.logger.Unsubscribe(ch)
+	streamSSE(w, r, ch)
+}
+
+func (s *Server) configureLogger(settings config.Settings) error {
+	return s.logger.ConfigureFile(filepath.Join(s.dataDir, "logs", "app.log"), settings.LogToFile, int64(settings.LogMaxMB)*1024*1024)
+}
+
+func (s *Server) groupByID(id string) ([]proxy.Group, int, error) {
+	groups, err := s.store.Groups()
+	if err != nil {
+		return nil, -1, err
+	}
+	for i := range groups {
+		if groups[i].ID == id {
+			return groups, i, nil
+		}
+	}
+	return nil, -1, errors.New("group not found")
+}
+
+func (s *Server) proxyByID(groupID, proxyID string) ([]proxy.Group, int, int, error) {
+	groups, gi, err := s.groupByID(groupID)
+	if err != nil {
+		return nil, -1, -1, err
+	}
+	for i := range groups[gi].Proxies {
+		if groups[gi].Proxies[i].ID == proxyID {
+			return groups, gi, i, nil
+		}
+	}
+	return nil, -1, -1, errors.New("proxy not found")
+}
+
+func assignID(p *proxy.Proxy) error {
+	id, err := idgen.New()
+	if err != nil {
+		return err
+	}
+	p.ID = id
+	return nil
+}
+
+func readJSON(r *http.Request, target any) error {
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+func streamSSE[T any](w http.ResponseWriter, r *http.Request, ch <-chan T) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, errors.New("streaming is not supported"))
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(event)
+			if err != nil {
+				fmt.Fprintf(w, "event: error\ndata: %q\n\n", err.Error())
+				flusher.Flush()
+				continue
+			}
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
+}
+
+func safeFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "proxies"
+	}
+	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_")
+	return replacer.Replace(name)
+}

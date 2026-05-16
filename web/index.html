@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>proxy-hub</title>
+  <link rel="stylesheet" href="./app.css">
+  <script defer src="./vendor/alpine.min.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body data-page="app">
+  <header class="topbar">
+    <div class="brand">proxy-hub</div>
+    <nav class="tabs" aria-label="主导航">
+      <button class="tab active" data-tab="proxies">代理</button>
+      <button class="tab" data-tab="settings">设置</button>
+      <button class="tab" data-tab="logs">日志</button>
+    </nav>
+    <button id="logoutBtn" class="ghost">退出</button>
+  </header>
+
+  <main class="app-shell">
+    <section id="notice" class="notice hidden"></section>
+
+    <section id="proxiesView" class="view active">
+      <div class="group-row">
+        <label for="groupSelect">分组</label>
+        <select id="groupSelect"></select>
+        <button id="newGroupBtn">新建分组</button>
+        <button id="renameGroupBtn" class="secondary">重命名</button>
+        <button id="deleteGroupBtn" class="danger">删除</button>
+      </div>
+
+      <div class="toolbar">
+        <button id="addProxyBtn">添加</button>
+        <button id="bulkProxyBtn">批量编辑</button>
+        <button id="latencyBtn">延迟测试</button>
+        <button id="echoBtn">IP回显</button>
+        <button id="exportBtn" class="secondary">导出</button>
+        <button id="copyGroupBtn" class="secondary">复制本组全部</button>
+      </div>
+
+      <div class="summary" id="summary"></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="check"><input id="selectAll" type="checkbox" aria-label="全选"></th>
+              <th>名称</th>
+              <th>协议</th>
+              <th>Host:Port</th>
+              <th>延迟</th>
+              <th>出口IP/结果</th>
+              <th>测试时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="proxyRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="settingsView" class="view">
+      <form id="settingsForm" class="settings-grid">
+        <label>
+          <span>并发数</span>
+          <input name="concurrency" type="number" min="1" max="200" required>
+        </label>
+        <label>
+          <span>单代理超时 ms</span>
+          <input name="timeout_ms" type="number" min="500" max="60000" required>
+        </label>
+        <label>
+          <span>延迟测试 URL</span>
+          <select id="testUrlPreset">
+            <option value="https://cp.cloudflare.com/generate_204">Cloudflare 204</option>
+            <option value="https://www.google.com/generate_204">Google 204</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
+        <label>
+          <span>自定义 URL</span>
+          <input name="test_url" type="url" required>
+        </label>
+        <label>
+          <span>成功规则</span>
+          <select id="expectedMode">
+            <option value="2xx">2xx</option>
+            <option value="status">指定状态码</option>
+          </select>
+        </label>
+        <label>
+          <span>期望状态码</span>
+          <input name="expected_status" type="number" min="0" max="599" required>
+        </label>
+        <label>
+          <span>低延迟阈值 ms</span>
+          <input name="low_latency_ms" type="number" min="1" max="60000" required>
+        </label>
+        <label class="inline">
+          <input name="log_to_file" type="checkbox">
+          <span>写入日志文件</span>
+        </label>
+        <label>
+          <span>日志最大 MB</span>
+          <input name="log_max_mb" type="number" min="1" max="100" required>
+        </label>
+        <div class="form-actions">
+          <button type="submit">保存</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="logsView" class="view">
+      <div class="toolbar">
+        <button id="refreshLogsBtn">刷新</button>
+        <span class="muted">自动刷新: 2s</span>
+      </div>
+      <pre id="logBox" class="log-box"></pre>
+    </section>
+  </main>
+
+  <dialog id="bulkDialog" class="modal">
+    <form method="dialog" class="modal-body">
+      <h2>批量编辑</h2>
+      <p class="muted">每行一个代理，支持 socks5://、user:pass@host:port、host:port:user:pass。</p>
+      <textarea id="bulkText" spellcheck="false"></textarea>
+      <div id="bulkErrors" class="form-error"></div>
+      <div class="modal-actions">
+        <button id="replaceBulkBtn" type="button">替换整组</button>
+        <button id="appendBulkBtn" type="button">追加去重</button>
+        <button class="secondary" value="cancel">取消</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

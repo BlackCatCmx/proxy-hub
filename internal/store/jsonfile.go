@@ -1,0 +1,247 @@
+package store
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
+
+	"proxy-hub/internal/config"
+	"proxy-hub/internal/proxy"
+)
+
+type JSONStore struct {
+	mu       sync.RWMutex
+	dataDir  string
+	groups   []proxy.Group
+	results  map[string]proxy.ProxyResult
+	settings config.Settings
+}
+
+func NewJSONStore(dataDir string) (*JSONStore, error) {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return nil, err
+	}
+	s := &JSONStore{
+		dataDir: dataDir,
+		results: make(map[string]proxy.ProxyResult),
+	}
+	if err := s.loadGroups(); err != nil {
+		return nil, err
+	}
+	if err := s.loadResults(); err != nil {
+		return nil, err
+	}
+	if err := s.loadSettings(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *JSONStore) Groups() ([]proxy.Group, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneGroups(s.groups), nil
+}
+
+func (s *JSONStore) SaveGroups(groups []proxy.Group) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	nextGroups := cloneGroups(groups)
+	nextResults := keepExistingResults(s.results, nextGroups)
+	if err := writeJSON(s.path("groups.json"), nextGroups); err != nil {
+		return err
+	}
+	if len(nextResults) != len(s.results) {
+		if err := writeJSON(s.path("results.json"), nextResults); err != nil {
+			return err
+		}
+	}
+	s.groups = nextGroups
+	s.results = nextResults
+	return nil
+}
+
+func (s *JSONStore) Results() (map[string]proxy.ProxyResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneResults(s.results), nil
+}
+
+func (s *JSONStore) MergeResults(updates map[string]proxy.ProxyResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := cloneResults(s.results)
+	for id, update := range updates {
+		current := next[id]
+		current.ProxyID = id
+		if update.Latency != nil {
+			current.Latency = update.Latency
+		}
+		if update.Echo != nil {
+			current.Echo = update.Echo
+		}
+		next[id] = current
+	}
+	next = keepExistingResults(next, s.groups)
+	if err := writeJSON(s.path("results.json"), next); err != nil {
+		return err
+	}
+	s.results = next
+	return nil
+}
+
+func (s *JSONStore) ClearResults(proxyIDs ...string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := cloneResults(s.results)
+	changed := false
+	for _, id := range proxyIDs {
+		if _, ok := next[id]; ok {
+			delete(next, id)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := writeJSON(s.path("results.json"), next); err != nil {
+		return err
+	}
+	s.results = next
+	return nil
+}
+
+func (s *JSONStore) Settings() (config.Settings, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.settings, nil
+}
+
+func (s *JSONStore) SaveSettings(settings config.Settings) error {
+	settings.FillDefaults()
+	if err := settings.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := writeJSON(s.path("settings.json"), settings); err != nil {
+		return err
+	}
+	s.settings = settings
+	return nil
+}
+
+func (s *JSONStore) loadGroups() error {
+	path := s.path("groups.json")
+	if !exists(path) {
+		s.groups = []proxy.Group{}
+		return writeJSON(path, s.groups)
+	}
+	return readJSON(path, &s.groups)
+}
+
+func (s *JSONStore) loadResults() error {
+	path := s.path("results.json")
+	if !exists(path) {
+		s.results = map[string]proxy.ProxyResult{}
+		return writeJSON(path, s.results)
+	}
+	return readJSON(path, &s.results)
+}
+
+func (s *JSONStore) loadSettings() error {
+	path := s.path("settings.json")
+	if !exists(path) {
+		s.settings = config.DefaultSettings()
+		return writeJSON(path, s.settings)
+	}
+	if err := readJSON(path, &s.settings); err != nil {
+		return err
+	}
+	s.settings.FillDefaults()
+	return s.settings.Validate()
+}
+
+func (s *JSONStore) path(name string) string {
+	return filepath.Join(s.dataDir, name)
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func readJSON(path string, target any) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, target)
+}
+
+func writeJSON(path string, value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return atomicWriteJSON(path, data)
+}
+
+func atomicWriteJSON(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		if runtime.GOOS == "windows" {
+			if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				_ = os.Remove(tmp)
+				return err
+			}
+			return os.Rename(tmp, path)
+		}
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func keepExistingResults(results map[string]proxy.ProxyResult, groups []proxy.Group) map[string]proxy.ProxyResult {
+	ids := make(map[string]struct{})
+	for _, group := range groups {
+		for _, p := range group.Proxies {
+			ids[p.ID] = struct{}{}
+		}
+	}
+	next := make(map[string]proxy.ProxyResult)
+	for id, result := range results {
+		if _, ok := ids[id]; ok {
+			next[id] = result
+		}
+	}
+	return next
+}
+
+func cloneGroups(groups []proxy.Group) []proxy.Group {
+	out := make([]proxy.Group, len(groups))
+	for i, group := range groups {
+		out[i] = group
+		out[i].Proxies = append([]proxy.Proxy(nil), group.Proxies...)
+	}
+	return out
+}
+
+func cloneResults(results map[string]proxy.ProxyResult) map[string]proxy.ProxyResult {
+	out := make(map[string]proxy.ProxyResult, len(results))
+	for id, result := range results {
+		out[id] = result
+	}
+	return out
+}

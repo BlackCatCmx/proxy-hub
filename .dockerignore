@@ -1,0 +1,12 @@
+.git
+.claude
+temp
+data
+logs
+*.exe
+*.test
+*.out
+coverage.out
+*.coverprofile
+.env
+.env.*
