@@ -370,7 +370,7 @@ func (s *Server) updateProxy(w http.ResponseWriter, r *http.Request) {
 			return nil, nil, errProxyNotFound
 		}
 		current = groups[gi].Proxies[pi]
-		clearIDs := []string(nil)
+		var clearIDs []string
 		if body.Raw != nil && strings.TrimSpace(*body.Raw) != current.Raw {
 			parsedRaw.ID = current.ID
 			parsedRaw.Label = current.Label

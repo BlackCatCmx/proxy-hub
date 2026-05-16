@@ -87,7 +87,8 @@ func (s *JSONStore) saveGroupsLocked(groups []proxy.Group) error {
 func (s *JSONStore) saveGroupsAndResultsLocked(groups []proxy.Group, results map[string]proxy.ProxyResult) error {
 	nextGroups := cloneGroups(groups)
 	nextResults := cloneResults(results)
-	if !sameResultIDs(nextResults, s.results) {
+	if !sameResultKeys(nextResults, s.results) {
+		// Results are written first so a mid-write failure does not leave stale results for edited proxies.
 		if err := writeJSON(s.path("results.json"), nextResults); err != nil {
 			return err
 		}
@@ -203,9 +204,10 @@ func (s *JSONStore) loadSettings() error {
 
 func (s *JSONStore) pruneLoadedResults() error {
 	pruned := keepExistingResults(s.results, s.groups)
-	if sameResultIDs(pruned, s.results) {
+	if sameResultKeys(pruned, s.results) {
 		return nil
 	}
+	// Startup pruning rewrites results.json when it contains proxy IDs no longer present in groups.json.
 	if err := writeJSON(s.path("results.json"), pruned); err != nil {
 		return err
 	}
@@ -287,7 +289,7 @@ func cloneResults(results map[string]proxy.ProxyResult) map[string]proxy.ProxyRe
 	return out
 }
 
-func sameResultIDs(a, b map[string]proxy.ProxyResult) bool {
+func sameResultKeys(a, b map[string]proxy.ProxyResult) bool {
 	if len(a) != len(b) {
 		return false
 	}
