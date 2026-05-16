@@ -25,7 +25,7 @@ func (t *Tester) Echo(ctx context.Context, p proxy.Proxy, settings config.Settin
 		result.Error = "IP echo is implemented for socks5 proxies only"
 		return result
 	}
-	timeout := time.Duration(settings.TimeoutMs) * time.Millisecond
+	timeout := echoSourceTimeout(time.Duration(settings.TimeoutMs) * time.Millisecond)
 	var lastErr error
 	for _, source := range echoSources() {
 		status, body, _, err := prober.FetchThroughSOCKS5(ctx, p, source.url, timeout)
@@ -53,6 +53,13 @@ func (t *Tester) Echo(ctx context.Context, p proxy.Proxy, settings config.Settin
 		result.Error = "all IP echo sources failed"
 	}
 	return result
+}
+
+func echoSourceTimeout(timeout time.Duration) time.Duration {
+	if timeout > 3*time.Second {
+		return 3 * time.Second
+	}
+	return timeout
 }
 
 func echoSources() []echoSource {

@@ -195,7 +195,7 @@ func parseHostPort(input, scheme, user, pass, raw string) (Proxy, error) {
 	}
 	return Proxy{
 		Scheme: scheme,
-		Host:   strings.Trim(host, "[]"),
+		Host:   host,
 		Port:   port,
 		User:   user,
 		Pass:   pass,

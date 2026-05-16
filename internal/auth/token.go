@@ -9,7 +9,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -112,13 +111,6 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		if runtime.GOOS == "windows" {
-			if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				_ = os.Remove(tmp)
-				return err
-			}
-			return os.Rename(tmp, path)
-		}
 		_ = os.Remove(tmp)
 		return err
 	}

@@ -142,7 +142,7 @@ func (l *Logger) Unsubscribe(ch chan Entry) {
 func appendFileLog(path string, maxBytes int64, entry Entry) error {
 	if maxBytes > 0 {
 		if info, err := os.Stat(path); err == nil && info.Size() > maxBytes {
-			if err := os.WriteFile(path, nil, 0o644); err != nil {
+			if err := rotateLogFile(path); err != nil {
 				return err
 			}
 		}
@@ -158,6 +158,17 @@ func appendFileLog(path string, maxBytes int64, entry Entry) error {
 	}
 	_, err = fmt.Fprintf(file, "%s\n", line)
 	return err
+}
+
+func rotateLogFile(path string) error {
+	rotated := path + ".1"
+	if err := os.Remove(rotated); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Rename(path, rotated); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func sanitizeFields(fields map[string]string) map[string]string {

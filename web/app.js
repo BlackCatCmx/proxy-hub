@@ -336,6 +336,7 @@
 
   function subscribeJob(id) {
     const source = new EventSource(`./api/test/jobs/${id}/stream`);
+    let completed = false;
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === "result" && data.result) {
@@ -345,12 +346,14 @@
         renderRows();
       }
       if (data.type === "complete") {
+        completed = true;
         source.close();
         loadResults().then(renderAll);
         showNotice(data.job.error ? `任务完成但保存失败: ${data.job.error}` : "任务完成", Boolean(data.job.error));
       }
     };
     source.onerror = () => {
+      if (completed) return;
       source.close();
       showNotice("任务流已断开，最终结果以快照为准", true);
       loadResults().then(renderAll);

@@ -21,6 +21,17 @@ import (
 	"proxy-hub/internal/version"
 )
 
+const (
+	maxJSONBodyBytes = 1 << 20
+	maxBulkBodyBytes = 5 << 20
+)
+
+var (
+	errGroupNotFound  = errors.New("group not found")
+	errProxyNotFound  = errors.New("proxy not found")
+	errDuplicateProxy = errors.New("proxy already exists in this group")
+)
+
 type Server struct {
 	store             store.Store
 	auth              *auth.Service
@@ -96,6 +107,7 @@ func (s *Server) staticFile(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusFound)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-cache")
 	http.FileServer(http.FS(s.static)).ServeHTTP(w, r)
 }
 
@@ -103,7 +115,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Key string `json:"key"`
 	}
-	if err := readJSON(r, &body); err != nil {
+	if err := readJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -148,18 +160,13 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	if err := readJSON(r, &body); err != nil {
+	if err := readJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
-		return
-	}
-	groups, err := s.store.Groups()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	id, err := idgen.New()
@@ -167,19 +174,21 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	groups = append(groups, proxy.Group{ID: id, Name: name, Created: time.Now(), Proxies: []proxy.Proxy{}})
-	if err := s.store.SaveGroups(groups); err != nil {
+	created := proxy.Group{ID: id, Name: name, Created: time.Now(), Proxies: []proxy.Proxy{}}
+	if err := s.store.UpdateGroups(func(groups []proxy.Group) ([]proxy.Group, error) {
+		return append(groups, created), nil
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, groups[len(groups)-1])
+	writeJSON(w, http.StatusCreated, created)
 }
 
 func (s *Server) renameGroup(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
 	}
-	if err := readJSON(r, &body); err != nil {
+	if err := readJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -188,28 +197,31 @@ func (s *Server) renameGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
 		return
 	}
-	groups, idx, err := s.groupByID(r.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+	var updated proxy.Group
+	if err := s.store.UpdateGroups(func(groups []proxy.Group) ([]proxy.Group, error) {
+		idx := groupIndex(groups, r.PathValue("id"))
+		if idx < 0 {
+			return nil, errGroupNotFound
+		}
+		groups[idx].Name = name
+		updated = groups[idx]
+		return groups, nil
+	}); err != nil {
+		writeStoreMutationError(w, err)
 		return
 	}
-	groups[idx].Name = name
-	if err := s.store.SaveGroups(groups); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, groups[idx])
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
-	groups, idx, err := s.groupByID(r.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	groups = append(groups[:idx], groups[idx+1:]...)
-	if err := s.store.SaveGroups(groups); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	if err := s.store.UpdateGroups(func(groups []proxy.Group) ([]proxy.Group, error) {
+		idx := groupIndex(groups, r.PathValue("id"))
+		if idx < 0 {
+			return nil, errGroupNotFound
+		}
+		return append(groups[:idx], groups[idx+1:]...), nil
+	}); err != nil {
+		writeStoreMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -219,7 +231,7 @@ func (s *Server) addProxy(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Raw string `json:"raw"`
 	}
-	if err := readJSON(r, &body); err != nil {
+	if err := readJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -232,20 +244,20 @@ func (s *Server) addProxy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	groups, idx, err := s.groupByID(r.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	for _, existing := range groups[idx].Proxies {
-		if existing.DedupKey() == p.DedupKey() {
-			writeError(w, http.StatusConflict, errors.New("proxy already exists in this group"))
-			return
+	if err := s.store.UpdateGroups(func(groups []proxy.Group) ([]proxy.Group, error) {
+		idx := groupIndex(groups, r.PathValue("id"))
+		if idx < 0 {
+			return nil, errGroupNotFound
 		}
-	}
-	groups[idx].Proxies = append(groups[idx].Proxies, p)
-	if err := s.store.SaveGroups(groups); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		for _, existing := range groups[idx].Proxies {
+			if existing.DedupKey() == p.DedupKey() {
+				return nil, errDuplicateProxy
+			}
+		}
+		groups[idx].Proxies = append(groups[idx].Proxies, p)
+		return groups, nil
+	}); err != nil {
+		writeStoreMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
@@ -256,7 +268,7 @@ func (s *Server) bulkProxies(w http.ResponseWriter, r *http.Request) {
 		Text string `json:"text"`
 		Mode string `json:"mode"`
 	}
-	if err := readJSON(r, &body); err != nil {
+	if err := readJSONLimited(w, r, &body, maxBulkBodyBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -272,43 +284,58 @@ func (s *Server) bulkProxies(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		seen[p.DedupKey()] = struct{}{}
-		if err := assignID(&p); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
 		unique = append(unique, p)
-	}
-	groups, idx, err := s.groupByID(r.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
 	}
 	imported := 0
 	skipped := 0
-	if body.Mode == "replace" {
-		groups[idx].Proxies = unique
-		imported = len(unique)
-	} else {
-		existing := make(map[string]struct{}, len(groups[idx].Proxies))
-		for _, p := range groups[idx].Proxies {
-			existing[p.DedupKey()] = struct{}{}
+	var updated proxy.Group
+	if err := s.store.UpdateGroups(func(groups []proxy.Group) ([]proxy.Group, error) {
+		idx := groupIndex(groups, r.PathValue("id"))
+		if idx < 0 {
+			return nil, errGroupNotFound
 		}
-		for _, p := range unique {
-			if _, ok := existing[p.DedupKey()]; ok {
-				skipped++
-				continue
+		if body.Mode == "replace" {
+			oldIDs := make(map[string]string, len(groups[idx].Proxies))
+			for _, p := range groups[idx].Proxies {
+				oldIDs[p.DedupKey()] = p.ID
 			}
-			existing[p.DedupKey()] = struct{}{}
-			groups[idx].Proxies = append(groups[idx].Proxies, p)
-			imported++
+			next := make([]proxy.Proxy, 0, len(unique))
+			for _, p := range unique {
+				if oldID := oldIDs[p.DedupKey()]; oldID != "" {
+					p.ID = oldID
+				} else if err := assignID(&p); err != nil {
+					return nil, err
+				}
+				next = append(next, p)
+			}
+			groups[idx].Proxies = next
+			imported = len(next)
+		} else {
+			existing := make(map[string]struct{}, len(groups[idx].Proxies))
+			for _, p := range groups[idx].Proxies {
+				existing[p.DedupKey()] = struct{}{}
+			}
+			for _, p := range unique {
+				if _, ok := existing[p.DedupKey()]; ok {
+					skipped++
+					continue
+				}
+				if err := assignID(&p); err != nil {
+					return nil, err
+				}
+				existing[p.DedupKey()] = struct{}{}
+				groups[idx].Proxies = append(groups[idx].Proxies, p)
+				imported++
+			}
 		}
-	}
-	if err := s.store.SaveGroups(groups); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		updated = groups[idx]
+		return groups, nil
+	}); err != nil {
+		writeStoreMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"group":              groups[idx],
+		"group":              updated,
 		"imported":           imported,
 		"skipped_duplicates": skipped,
 		"errors":             parseErrors,
@@ -320,34 +347,43 @@ func (s *Server) updateProxy(w http.ResponseWriter, r *http.Request) {
 		Label *string `json:"label"`
 		Raw   *string `json:"raw"`
 	}
-	if err := readJSON(r, &body); err != nil {
+	if err := readJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	groups, gi, pi, err := s.proxyByID(r.PathValue("id"), r.PathValue("pid"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	current := groups[gi].Proxies[pi]
-	rawChanged := false
-	if body.Raw != nil && strings.TrimSpace(*body.Raw) != current.Raw {
-		parsed, err := proxy.Parse(*body.Raw)
+	var parsedRaw proxy.Proxy
+	if body.Raw != nil {
+		var err error
+		parsedRaw, err = proxy.Parse(*body.Raw)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		parsed.ID = current.ID
-		parsed.Label = current.Label
-		current = parsed
-		rawChanged = true
 	}
-	if body.Label != nil {
-		current.Label = strings.TrimSpace(*body.Label)
-	}
-	groups[gi].Proxies[pi] = current
-	if err := s.store.SaveGroups(groups); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	rawChanged := false
+	var current proxy.Proxy
+	if err := s.store.UpdateGroups(func(groups []proxy.Group) ([]proxy.Group, error) {
+		gi, pi := proxyIndex(groups, r.PathValue("id"), r.PathValue("pid"))
+		if gi < 0 {
+			return nil, errGroupNotFound
+		}
+		if pi < 0 {
+			return nil, errProxyNotFound
+		}
+		current = groups[gi].Proxies[pi]
+		if body.Raw != nil && strings.TrimSpace(*body.Raw) != current.Raw {
+			parsedRaw.ID = current.ID
+			parsedRaw.Label = current.Label
+			current = parsedRaw
+			rawChanged = true
+		}
+		if body.Label != nil {
+			current.Label = strings.TrimSpace(*body.Label)
+		}
+		groups[gi].Proxies[pi] = current
+		return groups, nil
+	}); err != nil {
+		writeStoreMutationError(w, err)
 		return
 	}
 	if rawChanged {
@@ -360,14 +396,18 @@ func (s *Server) updateProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteProxy(w http.ResponseWriter, r *http.Request) {
-	groups, gi, pi, err := s.proxyByID(r.PathValue("id"), r.PathValue("pid"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	groups[gi].Proxies = append(groups[gi].Proxies[:pi], groups[gi].Proxies[pi+1:]...)
-	if err := s.store.SaveGroups(groups); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	if err := s.store.UpdateGroups(func(groups []proxy.Group) ([]proxy.Group, error) {
+		gi, pi := proxyIndex(groups, r.PathValue("id"), r.PathValue("pid"))
+		if gi < 0 {
+			return nil, errGroupNotFound
+		}
+		if pi < 0 {
+			return nil, errProxyNotFound
+		}
+		groups[gi].Proxies = append(groups[gi].Proxies[:pi], groups[gi].Proxies[pi+1:]...)
+		return groups, nil
+	}); err != nil {
+		writeStoreMutationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -394,7 +434,7 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 		GroupID  string         `json:"group_id"`
 		ProxyIDs []string       `json:"proxy_ids"`
 	}
-	if err := readJSON(r, &body); err != nil {
+	if err := readJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -421,7 +461,7 @@ func (s *Server) testOne(w http.ResponseWriter, r *http.Request) {
 		Kind tester.JobKind `json:"kind"`
 		Raw  string         `json:"raw"`
 	}
-	if err := readJSON(r, &body); err != nil {
+	if err := readJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -483,7 +523,7 @@ func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	var settings config.Settings
-	if err := readJSON(r, &settings); err != nil {
+	if err := readJSON(w, r, &settings); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -552,6 +592,28 @@ func (s *Server) proxyByID(groupID, proxyID string) ([]proxy.Group, int, int, er
 	return nil, -1, -1, errors.New("proxy not found")
 }
 
+func groupIndex(groups []proxy.Group, groupID string) int {
+	for i := range groups {
+		if groups[i].ID == groupID {
+			return i
+		}
+	}
+	return -1
+}
+
+func proxyIndex(groups []proxy.Group, groupID, proxyID string) (int, int) {
+	gi := groupIndex(groups, groupID)
+	if gi < 0 {
+		return -1, -1
+	}
+	for i := range groups[gi].Proxies {
+		if groups[gi].Proxies[i].ID == proxyID {
+			return gi, i
+		}
+	}
+	return gi, -1
+}
+
 func assignID(p *proxy.Proxy) error {
 	id, err := idgen.New()
 	if err != nil {
@@ -561,8 +623,13 @@ func assignID(p *proxy.Proxy) error {
 	return nil
 }
 
-func readJSON(r *http.Request, target any) error {
+func readJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	return readJSONLimited(w, r, target, maxJSONBodyBytes)
+}
+
+func readJSONLimited(w http.ResponseWriter, r *http.Request, target any, limit int64) error {
 	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(target)
@@ -576,6 +643,17 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+func writeStoreMutationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errGroupNotFound), errors.Is(err, errProxyNotFound):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, errDuplicateProxy):
+		writeError(w, http.StatusConflict, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
 }
 
 func streamSSE[T any](w http.ResponseWriter, r *http.Request, ch <-chan T) {

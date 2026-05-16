@@ -10,18 +10,20 @@ import (
 const CookieName = "proxy_hub_session"
 
 type Service struct {
-	adminHash [32]byte
-	tokens    *TokenManager
+	adminHash         [32]byte
+	tokens            *TokenManager
+	trustProxyHeaders bool
 }
 
-func NewService(adminKey, dataDir string) (*Service, error) {
+func NewService(adminKey, dataDir string, trustProxyHeaders bool) (*Service, error) {
 	tokens, err := NewTokenManager(dataDir, adminKey)
 	if err != nil {
 		return nil, err
 	}
 	return &Service{
-		adminHash: sha256.Sum256([]byte(adminKey)),
-		tokens:    tokens,
+		adminHash:         sha256.Sum256([]byte(adminKey)),
+		tokens:            tokens,
+		trustProxyHeaders: trustProxyHeaders,
 	}, nil
 }
 
@@ -42,7 +44,7 @@ func (s *Service) SetLoginCookie(w http.ResponseWriter, r *http.Request) error {
 		MaxAge:   int((10 * 365 * 24 * time.Hour).Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   isSecureRequest(r),
+		Secure:   isSecureRequest(r, s.trustProxyHeaders),
 	})
 	return nil
 }
@@ -55,7 +57,7 @@ func (s *Service) ClearLoginCookie(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   isSecureRequest(r),
+		Secure:   isSecureRequest(r, s.trustProxyHeaders),
 	})
 }
 
@@ -77,6 +79,6 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-func isSecureRequest(r *http.Request) bool {
-	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+func isSecureRequest(r *http.Request, trustProxyHeaders bool) bool {
+	return r.TLS != nil || (trustProxyHeaders && r.Header.Get("X-Forwarded-Proto") == "https")
 }

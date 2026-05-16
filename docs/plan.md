@@ -428,6 +428,7 @@ IO 约束：
 | `ADMIN_KEY` | 是 | 无 | 登录管理密钥；变更后旧登录 Cookie 自动失效 |
 | `DATA_DIR` | 否 | `/data` | 持久化目录；Zeabur Volume 挂载到 `/data` 时保持默认 |
 | `LISTEN` | 否 | `:8080` | HTTP 监听地址 |
+| `PORT` | 否 | 无 | Zeabur 注入的监听端口；仅当 `LISTEN` 未设置时生效 |
 | `TRUST_PROXY_HEADERS` | 否 | `0` | 设置为 `1` 时登录限速使用 `X-Forwarded-For` 获取客户端 IP |
 
 说明：
@@ -444,7 +445,7 @@ RUN mkdir -p /out/data
 FROM gcr.io/distroless/static:nonroot
 COPY --from=build /out/proxy-hub /proxy-hub
 COPY --from=build --chown=65532:65532 /out/data /data
-ENV LISTEN=:8080 DATA_DIR=/data
+ENV DATA_DIR=/data
 VOLUME ["/data"]
 USER 65532:65532
 ENTRYPOINT ["/proxy-hub"]

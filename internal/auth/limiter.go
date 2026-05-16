@@ -26,8 +26,10 @@ func NewLoginLimiter() *LoginLimiter {
 func (l *LoginLimiter) Allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now := time.Now()
+	l.cleanupExpiredLocked(now)
 	entry := l.entries[ip]
-	if entry.LockedUntil.After(time.Now()) {
+	if entry.LockedUntil.After(now) {
 		return false
 	}
 	return true
@@ -37,6 +39,7 @@ func (l *LoginLimiter) Fail(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
+	l.cleanupExpiredLocked(now)
 	entry := l.entries[ip]
 	if now.Sub(entry.UpdatedAt) > 10*time.Minute {
 		entry = loginFail{}
@@ -53,6 +56,14 @@ func (l *LoginLimiter) Success(ip string) {
 	l.mu.Lock()
 	delete(l.entries, ip)
 	l.mu.Unlock()
+}
+
+func (l *LoginLimiter) cleanupExpiredLocked(now time.Time) {
+	for ip, entry := range l.entries {
+		if now.Sub(entry.UpdatedAt) > 10*time.Minute && !entry.LockedUntil.After(now) {
+			delete(l.entries, ip)
+		}
+	}
 }
 
 func ClientIP(r *http.Request, trustProxyHeaders bool) string {

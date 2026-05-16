@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"proxy-hub/internal/api"
@@ -20,11 +25,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := config.ProbeDataDir(env.DataDir); err != nil {
+		log.Fatal(err)
+	}
 	jsonStore, err := store.NewJSONStore(env.DataDir)
 	if err != nil {
 		log.Fatal(err)
 	}
-	authService, err := auth.NewService(env.AdminKey, env.DataDir)
+	authService, err := auth.NewService(env.AdminKey, env.DataDir, env.TrustProxyHeaders)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -46,8 +54,26 @@ func main() {
 		Addr:              env.Listen,
 		Handler:           server.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- httpServer.ListenAndServe()
+	}()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	case sig := <-signals:
+		logger.Info("server shutting down", map[string]string{"signal": sig.String()})
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(ctx); err != nil {
+			log.Fatal(err)
+		}
 	}
 }

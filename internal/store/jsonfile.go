@@ -2,10 +2,8 @@ package store
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 
 	"proxy-hub/internal/config"
@@ -46,9 +44,23 @@ func (s *JSONStore) Groups() ([]proxy.Group, error) {
 	return cloneGroups(s.groups), nil
 }
 
+func (s *JSONStore) UpdateGroups(update func([]proxy.Group) ([]proxy.Group, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	nextGroups, err := update(cloneGroups(s.groups))
+	if err != nil {
+		return err
+	}
+	return s.saveGroupsLocked(nextGroups)
+}
+
 func (s *JSONStore) SaveGroups(groups []proxy.Group) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveGroupsLocked(groups)
+}
+
+func (s *JSONStore) saveGroupsLocked(groups []proxy.Group) error {
 	nextGroups := cloneGroups(groups)
 	nextResults := keepExistingResults(s.results, nextGroups)
 	if err := writeJSON(s.path("groups.json"), nextGroups); err != nil {
@@ -200,13 +212,6 @@ func atomicWriteJSON(path string, data []byte) error {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		if runtime.GOOS == "windows" {
-			if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				_ = os.Remove(tmp)
-				return err
-			}
-			return os.Rename(tmp, path)
-		}
 		_ = os.Remove(tmp)
 		return err
 	}

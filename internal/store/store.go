@@ -7,6 +7,7 @@ import (
 
 type Store interface {
 	Groups() ([]proxy.Group, error)
+	UpdateGroups(func([]proxy.Group) ([]proxy.Group, error)) error
 	SaveGroups([]proxy.Group) error
 	Results() (map[string]proxy.ProxyResult, error)
 	MergeResults(map[string]proxy.ProxyResult) error
