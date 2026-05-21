@@ -102,6 +102,13 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.copied,
+button.copied:hover {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: #9fd8b5;
+}
+
 input,
 select,
 textarea {
@@ -170,7 +177,7 @@ textarea {
   top: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 20px;
   min-height: 56px;
@@ -182,6 +189,7 @@ textarea {
 }
 
 .brand {
+  justify-self: start;
   font-weight: 700;
   font-size: 18px;
   letter-spacing: -0.2px;
@@ -189,8 +197,12 @@ textarea {
 
 .tabs {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 4px;
+}
+
+#logoutBtn {
+  justify-self: end;
 }
 
 .tab {
@@ -231,13 +243,19 @@ textarea {
 }
 
 .notice {
-  margin-bottom: 12px;
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  width: min(420px, calc(100vw - 32px));
+  margin: 0;
   padding: 10px 14px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--primary);
   border-radius: var(--radius-sm);
   background: var(--panel);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow);
+  line-height: 1.5;
   animation: notice-in 0.24s ease;
 }
 
@@ -251,7 +269,7 @@ textarea {
 @keyframes notice-in {
   from {
     opacity: 0;
-    transform: translateY(-6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -503,7 +521,7 @@ tr:last-child td {
   }
 
   .tabs {
-    justify-content: flex-start;
+    justify-content: center;
   }
 
   .settings-grid {

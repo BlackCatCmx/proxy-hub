@@ -218,7 +218,7 @@
       button.addEventListener("click", () => editProxy(button.dataset.edit));
     });
     tbody.querySelectorAll("[data-copy]").forEach((button) => {
-      button.addEventListener("click", () => copyText(findProxy(button.dataset.copy).raw));
+      button.addEventListener("click", () => copyText(findProxy(button.dataset.copy).raw, button));
     });
     tbody.querySelectorAll("[data-delete]").forEach((button) => {
       button.addEventListener("click", () => deleteProxy(button.dataset.delete));
@@ -390,7 +390,7 @@
   function copyGroup() {
     const group = currentGroup();
     if (!group) return;
-    copyText(group.proxies.map((item) => item.raw).join("\n"));
+    copyText(group.proxies.map((item) => item.raw).join("\n"), $("#copyGroupBtn"));
   }
 
   function toggleSelectAll(event) {
@@ -515,14 +515,43 @@
     return errors.map((item) => `第 ${item.line} 行: ${item.error}`).join("\n");
   }
 
-  async function copyText(text) {
-    await navigator.clipboard.writeText(text || "");
+  async function copyText(text, feedbackButton) {
+    try {
+      await navigator.clipboard.writeText(text || "");
+    } catch (error) {
+      showNotice(error.message || "复制失败", true);
+      return;
+    }
+    if (feedbackButton) {
+      showCopiedState(feedbackButton);
+      return;
+    }
     showNotice("已复制");
+  }
+
+  function showCopiedState(button) {
+    if (!button.dataset.copyOriginalText) {
+      button.dataset.copyOriginalText = button.textContent;
+      button.dataset.copyOriginalMinWidth = button.style.minWidth || "";
+      button.style.minWidth = `${button.offsetWidth}px`;
+    }
+    button.textContent = "✔";
+    button.classList.add("copied");
+    clearTimeout(button.copyTimer);
+    button.copyTimer = setTimeout(() => {
+      button.textContent = button.dataset.copyOriginalText;
+      button.classList.remove("copied");
+      button.style.minWidth = button.dataset.copyOriginalMinWidth;
+      delete button.dataset.copyOriginalText;
+      delete button.dataset.copyOriginalMinWidth;
+      delete button.copyTimer;
+    }, 1200);
   }
 
   function showNotice(message, isError) {
     const box = $("#notice");
     box.textContent = message;
+    box.setAttribute("role", isError ? "alert" : "status");
     box.classList.toggle("error", Boolean(isError));
     box.classList.remove("hidden");
     clearTimeout(showNotice.timer);
