@@ -8,6 +8,12 @@
   --primary: #2157b8;
   --primary-strong: #174596;
   --primary-soft: #e5edfb;
+  --accent: #0d8a86;
+  --accent-strong: #086e6b;
+  --accent-soft: #def2f0;
+  --accent-alt: #6534d0;
+  --accent-alt-strong: #4f24ad;
+  --accent-alt-soft: #ece1fb;
   --danger: #b42318;
   --danger-bg: #fff1f0;
   --ok: #138a46;
@@ -45,6 +51,10 @@ textarea {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: 1px solid var(--primary);
   background: var(--primary);
   color: #fff;
@@ -58,6 +68,13 @@ button {
 
 button:hover {
   background: var(--primary-strong);
+  border-color: var(--primary-strong);
+}
+
+button svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
 }
 
 button:active:not(:disabled) {
@@ -86,6 +103,40 @@ button.ghost:hover {
   color: var(--primary);
 }
 
+button.ghost {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+button.ghost:hover {
+  color: var(--text);
+  background: var(--bg-soft);
+  border-color: transparent;
+}
+
+button.accent {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+button.accent:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+button.accent-alt {
+  color: #fff;
+  background: var(--accent-alt);
+  border-color: var(--accent-alt);
+}
+
+button.accent-alt:hover {
+  background: var(--accent-alt-strong);
+  border-color: var(--accent-alt-strong);
+}
+
 button.danger {
   color: var(--danger);
   background: var(--danger-bg);
@@ -94,6 +145,7 @@ button.danger {
 
 button.danger:hover {
   background: #ffe1de;
+  border-color: #ffccc7;
   color: var(--danger);
 }
 
@@ -425,6 +477,59 @@ tr:last-child td {
 .result-error {
   color: var(--bad);
   background: var(--bad-bg);
+}
+
+.echo-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.echo-ip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 0;
+  margin: 0;
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: Consolas, "Courier New", monospace;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.echo-ip:hover {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.echo-ip.copied,
+.echo-ip.copied:hover {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.echo-cc {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+
+.echo-asn {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-family: Consolas, "Courier New", monospace;
 }
 
 .muted {

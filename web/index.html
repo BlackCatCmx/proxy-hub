@@ -25,18 +25,45 @@
       <div class="group-row">
         <label for="groupSelect">分组</label>
         <select id="groupSelect"></select>
-        <button id="newGroupBtn">新建分组</button>
-        <button id="renameGroupBtn" class="secondary">重命名</button>
-        <button id="deleteGroupBtn" class="danger">删除</button>
+        <button id="newGroupBtn">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
+          新建分组
+        </button>
+        <button id="renameGroupBtn" class="secondary">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 13.5 1-3 7-7 2 2-7 7-3 1z"/><path d="m9 5 2 2"/></svg>
+          重命名
+        </button>
+        <button id="deleteGroupBtn" class="danger">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6 4.5V3h4v1.5"/><path d="m4.6 4.5.6 8.6a1 1 0 0 0 1 .9h3.6a1 1 0 0 0 1-.9l.6-8.6"/><path d="M7 7.5v4M9 7.5v4"/></svg>
+          删除
+        </button>
       </div>
 
       <div class="toolbar">
-        <button id="addProxyBtn">添加</button>
-        <button id="bulkProxyBtn">批量编辑</button>
-        <button id="latencyBtn">延迟测试</button>
-        <button id="echoBtn">IP回显</button>
-        <button id="exportBtn" class="secondary">导出</button>
-        <button id="copyGroupBtn" class="secondary">复制本组全部</button>
+        <button id="addProxyBtn">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
+          添加
+        </button>
+        <button id="bulkProxyBtn" class="secondary">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></svg>
+          批量编辑
+        </button>
+        <button id="latencyBtn" class="accent">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="9.5" r="4.8"/><path d="M8 9.5V6.8"/><path d="M6.5 2.5h3M8 4V2.5"/></svg>
+          延迟测试
+        </button>
+        <button id="echoBtn" class="accent-alt">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11"/><path d="M8 2.5c1.8 2 1.8 9 0 11M8 2.5c-1.8 2-1.8 9 0 11"/></svg>
+          IP回显
+        </button>
+        <button id="exportBtn" class="ghost">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7.5"/><path d="m5 7.5 3 3 3-3"/><path d="M3 13.5h10"/></svg>
+          导出
+        </button>
+        <button id="copyGroupBtn" class="ghost">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="7.5" height="8" rx="1"/><path d="M10 5.5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h1.5"/></svg>
+          复制本组全部
+        </button>
       </div>
 
       <div class="summary" id="summary"></div>

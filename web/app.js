@@ -189,8 +189,8 @@
         <td>${echoHTML(result.echo)}</td>
         <td>${testTimeHTML(result)}</td>
         <td><div class="cell-actions">
-          <button class="secondary" data-test-latency="${escapeHTML(item.id)}">延迟</button>
-          <button class="secondary" data-test-echo="${escapeHTML(item.id)}">IP</button>
+          <button class="accent" data-test-latency="${escapeHTML(item.id)}">延迟</button>
+          <button class="accent-alt" data-test-echo="${escapeHTML(item.id)}">IP</button>
           <button class="secondary" data-edit="${escapeHTML(item.id)}">编辑</button>
           <button class="secondary" data-copy="${escapeHTML(item.id)}">复制</button>
           <button class="danger" data-delete="${escapeHTML(item.id)}">删除</button>
@@ -219,6 +219,9 @@
     });
     tbody.querySelectorAll("[data-copy]").forEach((button) => {
       button.addEventListener("click", () => copyText(findProxy(button.dataset.copy).raw, button));
+    });
+    tbody.querySelectorAll("[data-copy-ip]").forEach((button) => {
+      button.addEventListener("click", () => copyText(button.dataset.copyIp, button));
     });
     tbody.querySelectorAll("[data-delete]").forEach((button) => {
       button.addEventListener("click", () => deleteProxy(button.dataset.delete));
@@ -480,8 +483,19 @@
   function echoHTML(result) {
     if (!result) return "—";
     if (!result.ok) return `<span class="result-error" title="${escapeHTML(result.error || "")}">失败</span>`;
-    const parts = [result.echo_ip, result.country_code, result.asn ? `AS${result.asn}` : ""].filter(Boolean);
-    return `<span title="${escapeHTML([result.country, result.region, result.city, result.organization || result.asn_organization, result.source].filter(Boolean).join(" / "))}">${escapeHTML(parts.join(" "))}</span>`;
+    const tooltip = [result.country, result.region, result.city, result.organization || result.asn_organization, result.source].filter(Boolean).join(" / ");
+    const parts = [];
+    if (result.echo_ip) {
+      parts.push(`<button type="button" class="echo-ip" data-copy-ip="${escapeHTML(result.echo_ip)}" title="点击复制 IP">${escapeHTML(result.echo_ip)}</button>`);
+    }
+    if (result.country_code) {
+      parts.push(`<span class="echo-cc">${escapeHTML(result.country_code)}</span>`);
+    }
+    if (result.asn) {
+      parts.push(`<span class="echo-asn">AS${escapeHTML(String(result.asn))}</span>`);
+    }
+    if (!parts.length) return "—";
+    return `<div class="echo-cell" title="${escapeHTML(tooltip)}">${parts.join("")}</div>`;
   }
 
   function testTimeHTML(result) {
@@ -530,8 +544,8 @@
   }
 
   function showCopiedState(button) {
-    if (!button.dataset.copyOriginalText) {
-      button.dataset.copyOriginalText = button.textContent;
+    if (!button.dataset.copyOriginalHtml) {
+      button.dataset.copyOriginalHtml = button.innerHTML;
       button.dataset.copyOriginalMinWidth = button.style.minWidth || "";
       button.style.minWidth = `${button.offsetWidth}px`;
     }
@@ -539,10 +553,10 @@
     button.classList.add("copied");
     clearTimeout(button.copyTimer);
     button.copyTimer = setTimeout(() => {
-      button.textContent = button.dataset.copyOriginalText;
+      button.innerHTML = button.dataset.copyOriginalHtml;
       button.classList.remove("copied");
       button.style.minWidth = button.dataset.copyOriginalMinWidth;
-      delete button.dataset.copyOriginalText;
+      delete button.dataset.copyOriginalHtml;
       delete button.dataset.copyOriginalMinWidth;
       delete button.copyTimer;
     }, 1200);
