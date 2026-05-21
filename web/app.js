@@ -65,7 +65,6 @@
     $("#newGroupBtn").addEventListener("click", createGroup);
     $("#renameGroupBtn").addEventListener("click", renameGroup);
     $("#deleteGroupBtn").addEventListener("click", deleteGroup);
-    $("#addProxyBtn").addEventListener("click", addProxy);
     $("#bulkProxyBtn").addEventListener("click", openBulk);
     $("#replaceBulkBtn").addEventListener("click", () => submitBulk("replace"));
     $("#appendBulkBtn").addEventListener("click", () => submitBulk("append"));
@@ -126,7 +125,7 @@
     }
     select.value = state.currentGroupId;
     const hasGroup = Boolean(currentGroup());
-    ["renameGroupBtn", "deleteGroupBtn", "addProxyBtn", "bulkProxyBtn", "latencyBtn", "echoBtn", "exportBtn", "copyGroupBtn"].forEach((id) => {
+    ["renameGroupBtn", "deleteGroupBtn", "bulkProxyBtn", "latencyBtn", "echoBtn", "exportBtn", "copyGroupBtn"].forEach((id) => {
       $("#" + id).disabled = !hasGroup;
     });
   }
@@ -236,6 +235,7 @@
     form.test_url.value = state.settings.test_url;
     form.expected_status.value = state.settings.expected_status;
     form.low_latency_ms.value = state.settings.low_latency_ms;
+    form.red_latency_ms.value = state.settings.red_latency_ms;
     form.log_to_file.checked = state.settings.log_to_file;
     form.log_max_mb.value = state.settings.log_max_mb;
     const preset = $("#testUrlPreset");
@@ -283,15 +283,6 @@
     state.currentGroupId = "";
     state.selected.clear();
     await loadGroups();
-    renderAll();
-  }
-
-  async function addProxy() {
-    const group = currentGroup();
-    const raw = prompt("代理原文");
-    if (!group || !raw) return;
-    const item = await api(`./api/groups/${group.id}/proxies`, { method: "POST", body: { raw } });
-    group.proxies.push(item);
     renderAll();
   }
 
@@ -417,6 +408,7 @@
       test_url: form.test_url.value,
       expected_status: expectedMode === "2xx" ? 0 : Number(form.expected_status.value),
       low_latency_ms: Number(form.low_latency_ms.value),
+      red_latency_ms: Number(form.red_latency_ms.value),
       log_to_file: form.log_to_file.checked,
       log_max_mb: Number(form.log_max_mb.value)
     };
@@ -476,7 +468,8 @@
     if (!result) return "—";
     if (!result.ok) return `<span class="result-error" title="${escapeHTML(result.error || "")}">失败</span>`;
     const low = state.settings?.low_latency_ms || 100;
-    const cls = result.latency_ms <= low ? "lat-ok" : result.latency_ms <= low * 2 ? "lat-warn" : "lat-bad";
+    const red = state.settings?.red_latency_ms || low * 2 + 1;
+    const cls = result.latency_ms <= low ? "lat-ok" : result.latency_ms >= red ? "lat-bad" : "lat-warn";
     return `<span class="${cls}" title="${escapeHTML(result.dns_mode || "")}">${result.latency_ms}ms</span>`;
   }
 

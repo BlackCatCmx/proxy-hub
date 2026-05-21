@@ -40,13 +40,9 @@
       </div>
 
       <div class="toolbar">
-        <button id="addProxyBtn">
-          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
-          添加
-        </button>
         <button id="bulkProxyBtn" class="secondary">
           <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></svg>
-          批量编辑
+          管理代理
         </button>
         <button id="latencyBtn" class="accent">
           <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="9.5" r="4.8"/><path d="M8 9.5V6.8"/><path d="M6.5 2.5h3M8 4V2.5"/></svg>
@@ -121,8 +117,12 @@
           <input name="expected_status" type="number" min="0" max="599" required>
         </label>
         <label>
-          <span>低延迟阈值 ms</span>
+          <span>绿色延迟上限 ms</span>
           <input name="low_latency_ms" type="number" min="1" max="60000" required>
+        </label>
+        <label>
+          <span>红色延迟起点 ms</span>
+          <input name="red_latency_ms" type="number" min="2" max="120000" required>
         </label>
         <label class="inline">
           <input name="log_to_file" type="checkbox">
@@ -149,7 +149,7 @@
 
   <dialog id="bulkDialog" class="modal">
     <form method="dialog" class="modal-body">
-      <h2>批量编辑</h2>
+      <h2>管理代理</h2>
       <p class="muted">每行一个代理，支持 socks5://、user:pass@host:port、host:port:user:pass。</p>
       <textarea id="bulkText" spellcheck="false"></textarea>
       <div id="bulkErrors" class="form-error"></div>
