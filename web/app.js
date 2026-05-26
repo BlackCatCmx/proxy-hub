@@ -5,6 +5,8 @@
     groups: [],
     currentGroupId: "",
     results: {},
+    pendingJobs: {},
+    pendingSeq: 0,
     settings: null,
     selected: new Set(),
     logTimer: null
@@ -184,8 +186,8 @@
         <td><input class="label-input" data-label="${escapeHTML(item.id)}" value="${escapeHTML(item.label || "")}" placeholder="—"></td>
         <td>${escapeHTML(item.scheme)}</td>
         <td class="mono">${escapeHTML(item.host)}:${item.port}</td>
-        <td>${result.pendingLatency ? pendingHTML() : latencyHTML(result.latency)}</td>
-        <td>${result.pendingEcho ? pendingHTML() : echoHTML(result.echo)}</td>
+        <td>${hasPending("latency", result) ? pendingHTML() : latencyHTML(result.latency)}</td>
+        <td>${hasPending("echo", result) ? pendingHTML() : echoHTML(result.echo)}</td>
         <td>${testTimeHTML(result)}</td>
         <td><div class="cell-actions">
           <button class="accent" data-test-latency="${escapeHTML(item.id)}">延迟</button>
@@ -343,40 +345,93 @@
     if (!group) return;
     const proxy_ids = onlyIDs || Array.from(state.selected);
     const targets = proxy_ids.length > 0 ? proxy_ids : group.proxies.map((item) => item.id);
-    markPending(kind, targets);
+    const requestToken = newPendingToken();
+    markPending(kind, targets, requestToken);
     try {
       const response = await api("./api/test/jobs", {
         method: "POST",
         body: { kind, group_id: group.id, proxy_ids }
       });
+      bindPendingJob(kind, targets, requestToken, response.job_id);
       showNotice(`任务已启动: ${response.job_id}`);
       subscribeJob(response.job_id);
     } catch (error) {
-      clearPending(kind, targets);
+      clearPending(kind, targets, requestToken);
       showNotice(error.message || "任务启动失败", true);
     }
   }
 
-  function markPending(kind, ids) {
-    const field = kind === "latency" ? "pendingLatency" : "pendingEcho";
-    for (const id of ids) {
-      const current = state.results[id] || { proxy_id: id };
-      state.results[id] = { ...current, [field]: true };
-    }
-    renderSummary();
-    renderRows();
+  function newPendingToken() {
+    state.pendingSeq += 1;
+    return `pending-${state.pendingSeq}`;
   }
 
-  function clearPending(kind, ids) {
-    const field = kind === "latency" ? "pendingLatency" : "pendingEcho";
+  function markPending(kind, ids, token, shouldRender = true) {
+    const field = pendingField(kind);
+    for (const id of ids) {
+      const current = state.results[id] || { proxy_id: id };
+      const tokens = Array.isArray(current[field]) ? current[field].slice() : [];
+      if (!tokens.includes(token)) tokens.push(token);
+      state.results[id] = { ...current, [field]: tokens };
+    }
+    if (shouldRender) {
+      renderSummary();
+      renderRows();
+    }
+  }
+
+  function bindPendingJob(kind, ids, fromToken, jobID) {
+    state.pendingJobs[jobID] = { kind, ids: ids.slice() };
+    replacePendingToken(kind, ids, fromToken, jobID, false);
+  }
+
+  function replacePendingToken(kind, ids, fromToken, toToken, shouldRender = true) {
+    const field = pendingField(kind);
+    for (const id of ids) {
+      const current = state.results[id] || { proxy_id: id };
+      const tokens = Array.isArray(current[field]) ? current[field].filter((token) => token !== fromToken) : [];
+      if (!tokens.includes(toToken)) tokens.push(toToken);
+      state.results[id] = { ...current, [field]: tokens };
+    }
+    if (shouldRender) {
+      renderSummary();
+      renderRows();
+    }
+  }
+
+  function clearPending(kind, ids, token, shouldRender = true) {
+    const field = pendingField(kind);
     for (const id of ids) {
       const current = state.results[id];
-      if (current && current[field]) {
-        delete current[field];
+      if (!current || !Array.isArray(current[field])) continue;
+      const tokens = current[field].filter((item) => item !== token);
+      if (tokens.length) {
+        state.results[id] = { ...current, [field]: tokens };
+        continue;
       }
+      const next = { ...current };
+      delete next[field];
+      state.results[id] = next;
     }
-    renderSummary();
-    renderRows();
+    if (shouldRender) {
+      renderSummary();
+      renderRows();
+    }
+  }
+
+  function clearPendingJob(jobID, shouldRender = true) {
+    const pending = state.pendingJobs[jobID];
+    if (!pending) return;
+    clearPending(pending.kind, pending.ids, jobID, shouldRender);
+    delete state.pendingJobs[jobID];
+  }
+
+  function pendingField(kind) {
+    return kind === "latency" ? "pendingLatencyTokens" : "pendingEchoTokens";
+  }
+
+  function hasPending(kind, result) {
+    return Array.isArray(result?.[pendingField(kind)]) && result[pendingField(kind)].length > 0;
   }
 
   function subscribeJob(id) {
@@ -385,18 +440,21 @@
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === "result" && data.result) {
+        clearPendingJobResult(data.job?.id, data.proxy_id);
         const current = state.results[data.proxy_id] || { proxy_id: data.proxy_id };
-        const next = { ...current, ...data.result };
-        if (data.result.latency) delete next.pendingLatency;
-        if (data.result.echo) delete next.pendingEcho;
-        state.results[data.proxy_id] = next;
+        state.results[data.proxy_id] = { ...current, ...data.result };
         renderSummary();
         renderRows();
       }
       if (data.type === "complete") {
         completed = true;
         source.close();
-        loadResults().then(renderAll);
+        clearPendingJob(data.job.id, false);
+        loadResults().then(renderAll).catch((error) => {
+          renderSummary();
+          renderRows();
+          showNotice(error.message || "结果刷新失败", true);
+        });
         showNotice(data.job.error ? `任务完成但保存失败: ${data.job.error}` : "任务完成", Boolean(data.job.error));
       }
     };
@@ -404,8 +462,20 @@
       if (completed) return;
       source.close();
       showNotice("任务流已断开，最终结果以快照为准", true);
-      loadResults().then(renderAll);
+      loadResults().then(() => {
+        clearPendingJob(id, false);
+        renderAll();
+      }).catch((error) => {
+        clearPendingJob(id);
+        showNotice(error.message || "结果刷新失败", true);
+      });
     };
+  }
+
+  function clearPendingJobResult(jobID, proxyID) {
+    const pending = state.pendingJobs[jobID];
+    if (!pending || !proxyID) return;
+    clearPending(pending.kind, [proxyID], jobID, false);
   }
 
   function exportGroup() {
