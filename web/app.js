@@ -381,7 +381,7 @@
   }
 
   function bindPendingJob(kind, ids, fromToken, jobID) {
-    state.pendingJobs[jobID] = { kind, ids: ids.slice() };
+    state.pendingJobs[jobID] = { kind, ids: ids.slice(), watchdogMs: pendingWatchdogMs(kind) };
     replacePendingToken(kind, ids, fromToken, jobID, false);
   }
 
@@ -422,6 +422,8 @@
   function clearPendingJob(jobID, shouldRender = true) {
     const pending = state.pendingJobs[jobID];
     if (!pending) return;
+    clearTimeout(pending.watchdogTimer);
+    closePendingJobSource(jobID);
     clearPending(pending.kind, pending.ids, jobID, shouldRender);
     delete state.pendingJobs[jobID];
   }
@@ -430,17 +432,63 @@
     return kind === "latency" ? "pendingLatencyTokens" : "pendingEchoTokens";
   }
 
+  function pendingWatchdogMs(kind) {
+    const timeoutMs = state.settings?.timeout_ms || 5000;
+    const idleMs = kind === "echo" ? Math.min(timeoutMs, 3000) * 3 : timeoutMs;
+    return idleMs + 2000;
+  }
+
+  function armPendingJobWatchdog(jobID) {
+    const pending = state.pendingJobs[jobID];
+    if (!pending) return;
+    clearTimeout(pending.watchdogTimer);
+    pending.watchdogTimer = setTimeout(() => {
+      closePendingJobSource(jobID);
+      refreshStoppedJob(jobID, "任务流长时间无更新，正在按快照刷新结果");
+    }, pending.watchdogMs);
+  }
+
+  function bindPendingJobSource(jobID, source) {
+    const pending = state.pendingJobs[jobID];
+    if (!pending) return;
+    pending.source = source;
+    pending.streamClosed = false;
+  }
+
+  function closePendingJobSource(jobID) {
+    const pending = state.pendingJobs[jobID];
+    if (!pending || pending.streamClosed) return;
+    pending.streamClosed = true;
+    pending.source?.close();
+  }
+
+  function refreshStoppedJob(jobID, message) {
+    showNotice(message, true);
+    loadResults().then(() => {
+      clearPendingJob(jobID, false);
+      renderAll();
+    }).catch((error) => {
+      clearPendingJob(jobID);
+      showNotice(error.message || "结果刷新失败", true);
+    });
+  }
+
   function hasPending(kind, result) {
     return Array.isArray(result?.[pendingField(kind)]) && result[pendingField(kind)].length > 0;
   }
 
   function subscribeJob(id) {
     const source = new EventSource(`./api/test/jobs/${id}/stream`);
+    bindPendingJobSource(id, source);
+    armPendingJobWatchdog(id);
     let completed = false;
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      const jobID = data.job?.id || id;
+      const jobError = data.job?.error || "";
+      armPendingJobWatchdog(id);
       if (data.type === "result" && data.result) {
-        clearPendingJobResult(data.job?.id, data.proxy_id);
+        clearPendingJobResult(jobID, data.proxy_id);
         const current = state.results[data.proxy_id] || { proxy_id: data.proxy_id };
         state.results[data.proxy_id] = { ...current, ...data.result };
         renderSummary();
@@ -448,27 +496,20 @@
       }
       if (data.type === "complete") {
         completed = true;
-        source.close();
-        clearPendingJob(data.job.id, false);
+        closePendingJobSource(jobID);
+        clearPendingJob(jobID, false);
         loadResults().then(renderAll).catch((error) => {
           renderSummary();
           renderRows();
           showNotice(error.message || "结果刷新失败", true);
         });
-        showNotice(data.job.error ? `任务完成但保存失败: ${data.job.error}` : "任务完成", Boolean(data.job.error));
+        showNotice(jobError ? `任务完成但保存失败: ${jobError}` : "任务完成", Boolean(jobError));
       }
     };
     source.onerror = () => {
       if (completed) return;
-      source.close();
-      showNotice("任务流已断开，最终结果以快照为准", true);
-      loadResults().then(() => {
-        clearPendingJob(id, false);
-        renderAll();
-      }).catch((error) => {
-        clearPendingJob(id);
-        showNotice(error.message || "结果刷新失败", true);
-      });
+      closePendingJobSource(id);
+      refreshStoppedJob(id, "任务流已断开，最终结果以快照为准");
     };
   }
 
