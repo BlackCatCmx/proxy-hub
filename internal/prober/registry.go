@@ -2,7 +2,8 @@ package prober
 
 import (
 	"fmt"
-	"strings"
+
+	"proxy-hub/internal/proxy"
 )
 
 type Registry struct {
@@ -22,11 +23,11 @@ func NewDefaultRegistry() *Registry {
 }
 
 func (r *Registry) Register(scheme string, prober Prober) {
-	r.probers[strings.ToLower(scheme)] = prober
+	r.probers[proxy.CanonicalScheme(scheme)] = prober
 }
 
 func (r *Registry) Get(scheme string) (Prober, error) {
-	p, ok := r.probers[strings.ToLower(scheme)]
+	p, ok := r.probers[proxy.CanonicalScheme(scheme)]
 	if !ok {
 		return nil, fmt.Errorf("unsupported proxy scheme %q", scheme)
 	}

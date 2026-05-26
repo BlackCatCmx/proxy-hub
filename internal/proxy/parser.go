@@ -79,7 +79,7 @@ func parseURL(input string) (Proxy, error) {
 	if err != nil {
 		return Proxy{}, fmt.Errorf("invalid URL: %w", err)
 	}
-	scheme := strings.ToLower(u.Scheme)
+	scheme := CanonicalScheme(u.Scheme)
 	if scheme == "" {
 		scheme = "socks5"
 	}
@@ -173,6 +173,7 @@ func parseFourPart(input string) (Proxy, bool, error) {
 }
 
 func parseHostPort(input, scheme, user, pass, raw string) (Proxy, error) {
+	scheme = CanonicalScheme(scheme)
 	host, portText, err := net.SplitHostPort(input)
 	if err != nil {
 		if strings.Count(input, ":") == 1 {
@@ -227,7 +228,7 @@ func validateHost(host string) error {
 }
 
 func knownScheme(scheme string) bool {
-	switch strings.ToLower(scheme) {
+	switch CanonicalScheme(scheme) {
 	case "socks5", "http", "https":
 		return true
 	default:

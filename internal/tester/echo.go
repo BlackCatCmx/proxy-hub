@@ -21,7 +21,7 @@ type echoSource struct {
 
 func (t *Tester) Echo(ctx context.Context, p proxy.Proxy, settings config.Settings) proxy.EchoResult {
 	result := proxy.EchoResult{TestedAt: time.Now()}
-	if p.Scheme != "socks5" {
+	if proxy.CanonicalScheme(p.Scheme) != "socks5" {
 		result.Error = "IP echo is implemented for socks5 proxies only"
 		return result
 	}

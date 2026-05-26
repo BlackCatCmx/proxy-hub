@@ -1,6 +1,9 @@
 package proxy
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Group struct {
 	ID      string    `json:"id"`
@@ -25,7 +28,16 @@ func (p Proxy) Address() string {
 }
 
 func (p Proxy) DedupKey() string {
-	return p.Scheme + "\x00" + p.Host + "\x00" + itoa(p.Port) + "\x00" + p.User + "\x00" + p.Pass
+	return CanonicalScheme(p.Scheme) + "\x00" + p.Host + "\x00" + itoa(p.Port) + "\x00" + p.User + "\x00" + p.Pass
+}
+
+func CanonicalScheme(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "socks5h":
+		return "socks5"
+	default:
+		return strings.ToLower(strings.TrimSpace(s))
+	}
 }
 
 type ProxyResult struct {
