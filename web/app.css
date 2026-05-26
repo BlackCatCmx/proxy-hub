@@ -453,6 +453,7 @@ tr:last-child td {
 .lat-ok,
 .lat-warn,
 .lat-bad,
+.lat-pending,
 .result-error {
   display: inline-flex;
   align-items: center;
@@ -477,6 +478,17 @@ tr:last-child td {
 .result-error {
   color: var(--bad);
   background: var(--bad-bg);
+}
+
+.lat-pending {
+  color: var(--muted);
+  background: var(--bg-soft);
+  animation: pending-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 
 .echo-cell {

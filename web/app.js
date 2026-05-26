@@ -184,8 +184,8 @@
         <td><input class="label-input" data-label="${escapeHTML(item.id)}" value="${escapeHTML(item.label || "")}" placeholder="—"></td>
         <td>${escapeHTML(item.scheme)}</td>
         <td class="mono">${escapeHTML(item.host)}:${item.port}</td>
-        <td>${latencyHTML(result.latency)}</td>
-        <td>${echoHTML(result.echo)}</td>
+        <td>${result.pendingLatency ? pendingHTML() : latencyHTML(result.latency)}</td>
+        <td>${result.pendingEcho ? pendingHTML() : echoHTML(result.echo)}</td>
         <td>${testTimeHTML(result)}</td>
         <td><div class="cell-actions">
           <button class="accent" data-test-latency="${escapeHTML(item.id)}">延迟</button>
@@ -342,12 +342,41 @@
     const group = currentGroup();
     if (!group) return;
     const proxy_ids = onlyIDs || Array.from(state.selected);
-    const response = await api("./api/test/jobs", {
-      method: "POST",
-      body: { kind, group_id: group.id, proxy_ids }
-    });
-    showNotice(`任务已启动: ${response.job_id}`);
-    subscribeJob(response.job_id);
+    const targets = proxy_ids.length > 0 ? proxy_ids : group.proxies.map((item) => item.id);
+    markPending(kind, targets);
+    try {
+      const response = await api("./api/test/jobs", {
+        method: "POST",
+        body: { kind, group_id: group.id, proxy_ids }
+      });
+      showNotice(`任务已启动: ${response.job_id}`);
+      subscribeJob(response.job_id);
+    } catch (error) {
+      clearPending(kind, targets);
+      showNotice(error.message || "任务启动失败", true);
+    }
+  }
+
+  function markPending(kind, ids) {
+    const field = kind === "latency" ? "pendingLatency" : "pendingEcho";
+    for (const id of ids) {
+      const current = state.results[id] || { proxy_id: id };
+      state.results[id] = { ...current, [field]: true };
+    }
+    renderSummary();
+    renderRows();
+  }
+
+  function clearPending(kind, ids) {
+    const field = kind === "latency" ? "pendingLatency" : "pendingEcho";
+    for (const id of ids) {
+      const current = state.results[id];
+      if (current && current[field]) {
+        delete current[field];
+      }
+    }
+    renderSummary();
+    renderRows();
   }
 
   function subscribeJob(id) {
@@ -357,7 +386,10 @@
       const data = JSON.parse(event.data);
       if (data.type === "result" && data.result) {
         const current = state.results[data.proxy_id] || { proxy_id: data.proxy_id };
-        state.results[data.proxy_id] = { ...current, ...data.result };
+        const next = { ...current, ...data.result };
+        if (data.result.latency) delete next.pendingLatency;
+        if (data.result.echo) delete next.pendingEcho;
+        state.results[data.proxy_id] = next;
         renderSummary();
         renderRows();
       }
@@ -471,6 +503,10 @@
     const red = state.settings?.red_latency_ms || low * 2 + 1;
     const cls = result.latency_ms <= low ? "lat-ok" : result.latency_ms >= red ? "lat-bad" : "lat-warn";
     return `<span class="${cls}" title="${escapeHTML(result.dns_mode || "")}">${result.latency_ms}ms</span>`;
+  }
+
+  function pendingHTML() {
+    return `<span class="lat-pending" aria-live="polite">测试中</span>`;
   }
 
   function echoHTML(result) {
