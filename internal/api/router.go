@@ -27,9 +27,10 @@ const (
 )
 
 var (
-	errGroupNotFound  = errors.New("group not found")
-	errProxyNotFound  = errors.New("proxy not found")
-	errDuplicateProxy = errors.New("proxy already exists in this group")
+	errGroupNotFound   = errors.New("group not found")
+	errProxyNotFound   = errors.New("proxy not found")
+	errDuplicateProxy  = errors.New("proxy already exists in this group")
+	errReorderMismatch = errors.New("order must be a permutation of existing proxy ids")
 )
 
 type Server struct {
@@ -71,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/groups/{id}", s.protected(s.deleteGroup))
 	mux.Handle("POST /api/groups/{id}/proxies", s.protected(s.addProxy))
 	mux.Handle("POST /api/groups/{id}/proxies/bulk", s.protected(s.bulkProxies))
+	mux.Handle("POST /api/groups/{id}/proxies/reorder", s.protected(s.reorderProxies))
 	mux.Handle("PATCH /api/groups/{id}/proxies/{pid}", s.protected(s.updateProxy))
 	mux.Handle("DELETE /api/groups/{id}/proxies/{pid}", s.protected(s.deleteProxy))
 	mux.Handle("GET /api/groups/{id}/export", s.protected(s.exportGroup))
@@ -340,6 +342,58 @@ func (s *Server) bulkProxies(w http.ResponseWriter, r *http.Request) {
 		"skipped_duplicates": skipped,
 		"errors":             parseErrors,
 	})
+}
+
+func applyProxyOrder(existing []proxy.Proxy, order []string) ([]proxy.Proxy, error) {
+	if len(order) != len(existing) {
+		return nil, errReorderMismatch
+	}
+	byID := make(map[string]proxy.Proxy, len(existing))
+	for _, p := range existing {
+		byID[p.ID] = p
+	}
+	next := make([]proxy.Proxy, 0, len(order))
+	seen := make(map[string]struct{}, len(order))
+	for _, id := range order {
+		p, ok := byID[id]
+		if !ok {
+			return nil, errReorderMismatch
+		}
+		if _, dup := seen[id]; dup {
+			return nil, errReorderMismatch
+		}
+		seen[id] = struct{}{}
+		next = append(next, p)
+	}
+	return next, nil
+}
+
+func (s *Server) reorderProxies(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Order []string `json:"order"`
+	}
+	if err := readJSON(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var updated proxy.Group
+	if err := s.store.UpdateGroups(func(groups []proxy.Group) ([]proxy.Group, error) {
+		idx := groupIndex(groups, r.PathValue("id"))
+		if idx < 0 {
+			return nil, errGroupNotFound
+		}
+		next, err := applyProxyOrder(groups[idx].Proxies, body.Order)
+		if err != nil {
+			return nil, err
+		}
+		groups[idx].Proxies = next
+		updated = groups[idx]
+		return groups, nil
+	}); err != nil {
+		writeStoreMutationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (s *Server) updateProxy(w http.ResponseWriter, r *http.Request) {
@@ -631,6 +685,8 @@ func writeStoreMutationError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err)
 	case errors.Is(err, errDuplicateProxy):
 		writeError(w, http.StatusConflict, err)
+	case errors.Is(err, errReorderMismatch):
+		writeError(w, http.StatusBadRequest, err)
 	default:
 		writeError(w, http.StatusInternalServerError, err)
 	}

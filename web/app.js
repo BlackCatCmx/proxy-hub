@@ -9,7 +9,8 @@
     pendingSeq: 0,
     settings: null,
     selected: new Set(),
-    logTimer: null
+    logTimer: null,
+    reordering: false
   };
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -79,6 +80,103 @@
     $("#testUrlPreset").addEventListener("change", syncPresetToURL);
     $("#expectedMode").addEventListener("change", syncExpectedMode);
     $("#refreshLogsBtn").addEventListener("click", loadLogs);
+    bindRowDragAndDrop();
+  }
+
+  function bindRowDragAndDrop() {
+    const tbody = $("#proxyRows");
+    let dragId = null;
+
+    tbody.addEventListener("dragstart", (event) => {
+      const handle = event.target.closest(".drag-handle");
+      if (!handle) {
+        event.preventDefault();
+        return;
+      }
+      const row = handle.closest("tr[data-proxy-id]");
+      if (!row || state.reordering) {
+        event.preventDefault();
+        return;
+      }
+      dragId = row.dataset.proxyId;
+      event.dataTransfer.setData("text/plain", dragId);
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setDragImage(row, 0, 0);
+      row.classList.add("dragging");
+    });
+
+    tbody.addEventListener("dragover", (event) => {
+      if (!dragId) return;
+      const row = event.target.closest("tr[data-proxy-id]");
+      if (!row || row.dataset.proxyId === dragId) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const rect = row.getBoundingClientRect();
+      const after = event.clientY > rect.top + rect.height / 2;
+      clearDropMarkers(tbody);
+      row.classList.add(after ? "drop-after" : "drop-before");
+    });
+
+    tbody.addEventListener("drop", (event) => {
+      if (!dragId) return;
+      const row = event.target.closest("tr[data-proxy-id]");
+      if (!row || row.dataset.proxyId === dragId) return;
+      event.preventDefault();
+      const rect = row.getBoundingClientRect();
+      const after = event.clientY > rect.top + rect.height / 2;
+      commitReorder(dragId, row.dataset.proxyId, after);
+    });
+
+    tbody.addEventListener("dragend", () => {
+      dragId = null;
+      tbody.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
+      clearDropMarkers(tbody);
+    });
+  }
+
+  function clearDropMarkers(tbody) {
+    tbody.querySelectorAll(".drop-before, .drop-after").forEach((el) => {
+      el.classList.remove("drop-before", "drop-after");
+    });
+  }
+
+  function reorderBusy() {
+    if (state.reordering) {
+      showNotice("排序保存中，请稍候", true);
+      return true;
+    }
+    return false;
+  }
+
+  async function commitReorder(dragId, targetId, after) {
+    const group = currentGroup();
+    if (!group || state.reordering) return;
+    const prev = group.proxies.slice();
+    const order = prev.map((item) => item.id).filter((id) => id !== dragId);
+    const at = order.indexOf(targetId);
+    if (at < 0) return;
+    order.splice(after ? at + 1 : at, 0, dragId);
+    if (order.every((id, i) => id === prev[i]?.id)) return;
+
+    const byID = new Map(prev.map((item) => [item.id, item]));
+    group.proxies = order.map((id) => byID.get(id)).filter(Boolean);
+    state.reordering = true;
+    renderAll();
+    try {
+      const updated = await api(`./api/groups/${group.id}/proxies/reorder`, { method: "POST", body: { order } });
+      Object.assign(group, updated);
+    } catch (error) {
+      try {
+        await loadGroups();
+        showNotice(error.message || "排序保存失败", true);
+      } catch (refreshError) {
+        const reason = refreshError.message || "刷新代理列表失败";
+        showNotice(`${error.message || "排序保存失败"}；${reason}`, true);
+      }
+    } finally {
+      state.reordering = false;
+      renderAll();
+    }
   }
 
   async function loadGroups() {
@@ -174,14 +272,16 @@
     if (!group || group.proxies.length === 0) {
       const tr = document.createElement("tr");
       tr.className = "empty";
-      tr.innerHTML = `<td colspan="8">暂无代理</td>`;
+      tr.innerHTML = `<td colspan="9">暂无代理</td>`;
       tbody.appendChild(tr);
       return;
     }
     for (const item of group.proxies) {
       const result = state.results[item.id] || {};
       const tr = document.createElement("tr");
+      tr.dataset.proxyId = item.id;
       tr.innerHTML = `
+        <td class="drag-col"><span class="drag-handle" draggable="true" title="拖动排序" aria-label="拖动排序"><svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><circle cx="6" cy="4" r="1.3"/><circle cx="10" cy="4" r="1.3"/><circle cx="6" cy="8" r="1.3"/><circle cx="10" cy="8" r="1.3"/><circle cx="6" cy="12" r="1.3"/><circle cx="10" cy="12" r="1.3"/></svg></span></td>
         <td class="check"><input type="checkbox" data-select="${escapeHTML(item.id)}"></td>
         <td><input class="label-input" data-label="${escapeHTML(item.id)}" value="${escapeHTML(item.label || "")}" placeholder="—"></td>
         <td>${escapeHTML(item.scheme)}</td>
@@ -271,6 +371,7 @@
   async function renameGroup() {
     const group = currentGroup();
     if (!group) return;
+    if (reorderBusy()) return;
     const name = prompt("分组名称", group.name);
     if (!name) return;
     const updated = await api(`./api/groups/${group.id}`, { method: "PATCH", body: { name } });
@@ -280,6 +381,7 @@
 
   async function deleteGroup() {
     const group = currentGroup();
+    if (reorderBusy()) return;
     if (!group || !confirm(`删除分组 ${group.name}？`)) return;
     await api(`./api/groups/${group.id}`, { method: "DELETE" });
     state.currentGroupId = "";
@@ -299,6 +401,7 @@
   async function submitBulk(mode) {
     const group = currentGroup();
     if (!group) return;
+    if (reorderBusy()) return;
     const response = await api(`./api/groups/${group.id}/proxies/bulk`, {
       method: "POST",
       body: { text: $("#bulkText").value, mode }
@@ -316,6 +419,10 @@
 
   async function updateProxy(id, patch) {
     const group = currentGroup();
+    if (reorderBusy()) {
+      renderRows();
+      return;
+    }
     const updated = await api(`./api/groups/${group.id}/proxies/${id}`, { method: "PATCH", body: patch });
     const index = group.proxies.findIndex((item) => item.id === id);
     if (index >= 0) group.proxies[index] = updated;
@@ -332,6 +439,7 @@
 
   async function deleteProxy(id) {
     const group = currentGroup();
+    if (reorderBusy()) return;
     if (!confirm("删除该代理？")) return;
     await api(`./api/groups/${group.id}/proxies/${id}`, { method: "DELETE" });
     group.proxies = group.proxies.filter((item) => item.id !== id);
