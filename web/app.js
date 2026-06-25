@@ -69,8 +69,7 @@
     $("#renameGroupBtn").addEventListener("click", renameGroup);
     $("#deleteGroupBtn").addEventListener("click", deleteGroup);
     $("#bulkProxyBtn").addEventListener("click", openBulk);
-    $("#replaceBulkBtn").addEventListener("click", () => submitBulk("replace"));
-    $("#appendBulkBtn").addEventListener("click", () => submitBulk("append"));
+    $("#saveBulkBtn").addEventListener("click", saveBulk);
     $("#latencyBtn").addEventListener("click", () => startJob("latency"));
     $("#echoBtn").addEventListener("click", () => startJob("echo"));
     $("#exportBtn").addEventListener("click", exportGroup);
@@ -398,13 +397,13 @@
     $("#bulkDialog").showModal();
   }
 
-  async function submitBulk(mode) {
+  async function saveBulk() {
     const group = currentGroup();
     if (!group) return;
     if (reorderBusy()) return;
     const response = await api(`./api/groups/${group.id}/proxies/bulk`, {
       method: "POST",
-      body: { text: $("#bulkText").value, mode }
+      body: { text: $("#bulkText").value, mode: "replace" }
     });
     Object.assign(group, response.group);
     state.selected.clear();
@@ -414,7 +413,7 @@
     }
     await loadResults();
     renderAll();
-    showNotice(`已导入 ${response.imported} 条，重复 ${response.skipped_duplicates} 条`);
+    showNotice(`已保存 ${response.imported} 条`);
   }
 
   async function updateProxy(id, patch) {
