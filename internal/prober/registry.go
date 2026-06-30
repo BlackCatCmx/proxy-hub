@@ -17,6 +17,7 @@ func NewRegistry() *Registry {
 func NewDefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register("socks5", Socks5Prober{})
+	r.Register("socks5h", Socks5Prober{})
 	r.Register("http", UnsupportedProber{Scheme: "http"})
 	r.Register("https", UnsupportedProber{Scheme: "https"})
 	return r

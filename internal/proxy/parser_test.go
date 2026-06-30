@@ -14,7 +14,7 @@ func TestParseSupportedFormats(t *testing.T) {
 	}{
 		{name: "url no auth", input: "socks5://1.2.3.4:1080", host: "1.2.3.4", port: 1080, scheme: "socks5"},
 		{name: "url auth", input: "socks5://user:pass@example.com:1080", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5"},
-		{name: "url socks5h", input: "socks5h://user:pass@example.com:1080", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5"},
+		{name: "url socks5h", input: "socks5h://user:pass@example.com:1080", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5h"},
 		{name: "user pass at host", input: "user:pass@example.com:1080", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5"},
 		{name: "host at user pass", input: "example.com:1080@user:pass", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5"},
 		{name: "host port user pass", input: "example.com:1080:user:pass", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5"},
@@ -58,10 +58,10 @@ func TestParseLinesKeepsValidRows(t *testing.T) {
 	}
 }
 
-func TestDedupKeyTreatsSocks5AndSocks5HAsSameProxy(t *testing.T) {
+func TestDedupKeyTreatsSocks5AndSocks5HAsDifferentProxies(t *testing.T) {
 	a := Proxy{Scheme: "socks5", Host: "example.com", Port: 1080, User: "user", Pass: "pass"}
 	b := Proxy{Scheme: "socks5h", Host: "example.com", Port: 1080, User: "user", Pass: "pass"}
-	if a.DedupKey() != b.DedupKey() {
-		t.Fatalf("DedupKey() mismatch: %q != %q", a.DedupKey(), b.DedupKey())
+	if a.DedupKey() == b.DedupKey() {
+		t.Fatalf("DedupKey() treated socks5 and socks5h as the same proxy: %q", a.DedupKey())
 	}
 }

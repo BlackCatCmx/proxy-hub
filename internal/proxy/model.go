@@ -32,12 +32,7 @@ func (p Proxy) DedupKey() string {
 }
 
 func CanonicalScheme(s string) string {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "socks5h":
-		return "socks5"
-	default:
-		return strings.ToLower(strings.TrimSpace(s))
-	}
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 type ProxyResult struct {

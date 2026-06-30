@@ -135,7 +135,7 @@ type Group struct {
 type Proxy struct {
     ID     string `json:"id"`
     Label  string `json:"label,omitempty"` // 用户命名，可缺省
-    Scheme string `json:"scheme"`          // socks5/http/https
+    Scheme string `json:"scheme"`          // socks5/socks5h/http/https
     Host   string `json:"host"`
     Port   int    `json:"port"`
     User   string `json:"user,omitempty"`
@@ -206,7 +206,7 @@ type EchoResult struct {
 ## 代理字符串解析（parser.go）
 
 ```
-预处理: trim, 去 scheme（默认 socks5）, 记录原文存 Raw
+预处理: trim，保留 scheme（默认 socks5），记录原文存 Raw
 
 按优先级匹配：
 1) scheme://[user:pass@]host:port              # 完整 URL
@@ -235,7 +235,7 @@ Probe(ctx, p):
   dial TCP p.Host:p.Port (DialContext + timeout)
   SOCKS5 greet  → method nego (0x00 / 0x02 auth)
   if user/pass:  username/password subnegotiation (RFC1929)
-  CONNECT target = testURL.host:testURL.port → ATYP=0x03 远端解析域名，期望 0x00 reply
+  CONNECT target = testURL.host:testURL.port → 按 socks5/socks5h 选择本地或远端 DNS，期望 0x00 reply
   if testURL.scheme == https:
       在隧道上做 TLS 握手（ServerName=testURL.host）
       发送 HTTP GET testURL.path
@@ -248,11 +248,10 @@ Probe(ctx, p):
 
 DNS 规则：
 - 连接 SOCKS5 网关本身时，`p.Host` 由运行环境解析，因为必须先连上代理服务器。
-- 代理内访问测试 URL 时，默认把域名通过 SOCKS5 `ATYP=0x03` 交给代理服务器解析。
-- 这相当于 curl 等客户端里的 `socks5h` 行为。
-- 如果代理明确返回不支持域名地址类型或域名连接失败，回退为本地解析 DNS，再用 `ATYP=0x01/0x04` 连接解析出的 IP。
-- 回退结果仍可判定代理可用，但测试结果中标记 `dns_mode=remote|local_fallback`，便于识别供应商能力差异。
-- 不在设置页增加 DNS 开关，避免把内部兼容细节暴露给日常使用。
+- `socks5://` 对测试 URL 域名执行本地 DNS 解析，再用 `ATYP=0x01/0x04` 把 IP 发给代理。
+- `socks5h://` 把测试 URL 域名通过 `ATYP=0x03` 发给代理，由代理服务器解析。
+- 两种模式严格区分，不做自动回退；失败结果中保留明确错误。
+- 测试结果中标记 `dns_mode=local|remote|ip`，便于识别实际连接方式。
 
 IP 回显测试独立执行：
 ```

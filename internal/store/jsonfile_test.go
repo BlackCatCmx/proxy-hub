@@ -162,6 +162,57 @@ func TestNewJSONStorePrunesOrphanResults(t *testing.T) {
 	}
 }
 
+func TestNewJSONStoreRestoresSchemeFromRaw(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "groups.json"), []byte(`[
+  {
+    "id": "group-1",
+    "name": "group",
+    "created": "2026-06-30T00:00:00Z",
+    "proxies": [
+      {
+        "id": "proxy-1",
+        "scheme": "socks5",
+        "host": "example.com",
+        "port": 1080,
+        "raw": "socks5h://example.com:1080"
+      }
+    ]
+  }
+]
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(groups.json) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "results.json"), []byte(`{
+  "proxy-1": {"proxy_id":"proxy-1"}
+}
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(results.json) error = %v", err)
+	}
+
+	s, err := NewJSONStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewJSONStore() error = %v", err)
+	}
+	groups, err := s.Groups()
+	if err != nil {
+		t.Fatalf("Groups() error = %v", err)
+	}
+	if got := groups[0].Proxies[0].Scheme; got != "socks5h" {
+		t.Fatalf("loaded scheme = %q, want socks5h", got)
+	}
+	results, err := s.Results()
+	if err != nil {
+		t.Fatalf("Results() error = %v", err)
+	}
+	if _, ok := results["proxy-1"]; ok {
+		t.Fatal("result for normalized proxy was not cleared")
+	}
+}
+
 func testGroup() proxy.Group {
 	return proxy.Group{
 		ID:      "group-1",

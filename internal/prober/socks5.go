@@ -129,27 +129,34 @@ func connectSOCKS5(ctx context.Context, p proxy.Proxy, destHost string, destPort
 		return conn, "ip", err
 	}
 
-	conn, err := connectSOCKS5Once(ctx, p, socksAddress{domain: destHost, port: destPort}, timeout)
-	if err == nil {
-		return conn, "remote", nil
+	switch proxy.CanonicalScheme(p.Scheme) {
+	case "socks5":
+		return connectSOCKS5Local(ctx, p, destHost, destPort, timeout)
+	case "socks5h":
+		conn, err := connectSOCKS5Once(ctx, p, socksAddress{domain: destHost, port: destPort}, timeout)
+		return conn, "remote", err
+	default:
+		return nil, "", fmt.Errorf("unsupported proxy scheme %q", p.Scheme)
 	}
-	var replyErr socksReplyError
-	if !errors.As(err, &replyErr) || (replyErr.code != 0x04 && replyErr.code != 0x08) {
-		return nil, "remote", err
-	}
+}
 
+func connectSOCKS5Local(ctx context.Context, p proxy.Proxy, destHost string, destPort int, timeout time.Duration) (net.Conn, string, error) {
 	addrs, resolveErr := net.DefaultResolver.LookupIPAddr(ctx, destHost)
 	if resolveErr != nil {
-		return nil, "remote", err
+		return nil, "local", resolveErr
 	}
+	var err error
 	for _, addr := range addrs {
 		conn, localErr := connectSOCKS5Once(ctx, p, socksAddress{ip: addr.IP, port: destPort}, timeout)
 		if localErr == nil {
-			return conn, "local_fallback", nil
+			return conn, "local", nil
 		}
 		err = localErr
 	}
-	return nil, "local_fallback", err
+	if err == nil {
+		err = errors.New("local DNS returned no addresses")
+	}
+	return nil, "local", err
 }
 
 type socksAddress struct {

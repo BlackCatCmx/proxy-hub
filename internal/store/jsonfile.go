@@ -26,10 +26,14 @@ func NewJSONStore(dataDir string) (*JSONStore, error) {
 		dataDir: dataDir,
 		results: make(map[string]proxy.ProxyResult),
 	}
-	if err := s.loadGroups(); err != nil {
+	normalizedProxyIDs, err := s.loadGroups()
+	if err != nil {
 		return nil, err
 	}
 	if err := s.loadResults(); err != nil {
+		return nil, err
+	}
+	if err := s.clearLoadedResults(normalizedProxyIDs); err != nil {
 		return nil, err
 	}
 	if err := s.loadSettings(); err != nil {
@@ -171,13 +175,21 @@ func (s *JSONStore) SaveSettings(settings config.Settings) error {
 	return nil
 }
 
-func (s *JSONStore) loadGroups() error {
+func (s *JSONStore) loadGroups() ([]string, error) {
 	path := s.path("groups.json")
 	if !exists(path) {
 		s.groups = []proxy.Group{}
-		return writeJSON(path, s.groups)
+		return nil, writeJSON(path, s.groups)
 	}
-	return readJSON(path, &s.groups)
+	if err := readJSON(path, &s.groups); err != nil {
+		return nil, err
+	}
+	groups, changedIDs := normalizeLoadedGroups(s.groups)
+	s.groups = groups
+	if len(changedIDs) > 0 {
+		return changedIDs, writeJSON(path, s.groups)
+	}
+	return nil, nil
 }
 
 func (s *JSONStore) loadResults() error {
@@ -187,6 +199,23 @@ func (s *JSONStore) loadResults() error {
 		return writeJSON(path, s.results)
 	}
 	return readJSON(path, &s.results)
+}
+
+func (s *JSONStore) clearLoadedResults(proxyIDs []string) error {
+	if len(proxyIDs) == 0 {
+		return nil
+	}
+	changed := false
+	for _, id := range proxyIDs {
+		if _, ok := s.results[id]; ok {
+			delete(s.results, id)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return writeJSON(s.path("results.json"), s.results)
 }
 
 func (s *JSONStore) loadSettings() error {
@@ -279,6 +308,29 @@ func cloneGroups(groups []proxy.Group) []proxy.Group {
 		out[i].Proxies = append([]proxy.Proxy(nil), group.Proxies...)
 	}
 	return out
+}
+
+func normalizeLoadedGroups(groups []proxy.Group) ([]proxy.Group, []string) {
+	next := cloneGroups(groups)
+	var changedIDs []string
+	for gi := range next {
+		for pi := range next[gi].Proxies {
+			p := &next[gi].Proxies[pi]
+			scheme := proxy.CanonicalScheme(p.Scheme)
+			if parsed, err := proxy.Parse(p.Raw); err == nil && sameProxyEndpoint(*p, parsed) {
+				scheme = parsed.Scheme
+			}
+			if p.Scheme != scheme {
+				p.Scheme = scheme
+				changedIDs = append(changedIDs, p.ID)
+			}
+		}
+	}
+	return next, changedIDs
+}
+
+func sameProxyEndpoint(a, b proxy.Proxy) bool {
+	return a.Host == b.Host && a.Port == b.Port && a.User == b.User && a.Pass == b.Pass
 }
 
 func cloneResults(results map[string]proxy.ProxyResult) map[string]proxy.ProxyResult {

@@ -229,7 +229,7 @@ func validateHost(host string) error {
 
 func knownScheme(scheme string) bool {
 	switch CanonicalScheme(scheme) {
-	case "socks5", "http", "https":
+	case "socks5", "socks5h", "http", "https":
 		return true
 	default:
 		return false
