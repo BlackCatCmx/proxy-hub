@@ -545,6 +545,7 @@ tr.drop-after td {
 .echo-ip {
   display: inline-flex;
   align-items: center;
+  max-width: 18ch;
   min-height: 0;
   margin: 0;
   padding: 2px 6px;
@@ -556,6 +557,9 @@ tr.drop-after td {
   letter-spacing: 0.1px;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .echo-ip:hover {
