@@ -271,7 +271,7 @@
     if (!group || group.proxies.length === 0) {
       const tr = document.createElement("tr");
       tr.className = "empty";
-      tr.innerHTML = `<td colspan="9">暂无代理</td>`;
+      tr.innerHTML = `<td colspan="8">暂无代理</td>`;
       tbody.appendChild(tr);
       return;
     }
@@ -287,7 +287,6 @@
         <td class="mono">${escapeHTML(item.host)}:${item.port}</td>
         <td>${hasPending("latency", result) ? pendingHTML() : latencyHTML(result.latency)}</td>
         <td>${hasPending("echo", result) ? pendingHTML() : echoHTML(result.echo)}</td>
-        <td>${testTimeHTML(result)}</td>
         <td><div class="cell-actions">
           <button class="accent" data-test-latency="${escapeHTML(item.id)}">延迟</button>
           <button class="accent-alt" data-test-echo="${escapeHTML(item.id)}">IP</button>
@@ -743,12 +742,6 @@
     }
     if (!parts.length) return "—";
     return `<div class="echo-cell" title="${escapeHTML(tooltip)}">${parts.join("")}</div>`;
-  }
-
-  function testTimeHTML(result) {
-    const times = [result.latency?.tested_at, result.echo?.tested_at].filter(Boolean).map((value) => new Date(value).getTime());
-    if (!times.length) return "—";
-    return formatTime(new Date(Math.max(...times)));
   }
 
   function latestTestTime(results) {
