@@ -44,6 +44,39 @@ func TestUpdateGroupsAndClearResults(t *testing.T) {
 	}
 }
 
+func TestSaveGroupsPreservesEmptyProxyList(t *testing.T) {
+	dataDir := t.TempDir()
+	s, err := NewJSONStore(dataDir)
+	if err != nil {
+		t.Fatalf("NewJSONStore() error = %v", err)
+	}
+	group := proxy.Group{
+		ID:      "empty-group",
+		Name:    "empty",
+		Created: time.Now(),
+		Proxies: []proxy.Proxy{},
+	}
+	if err := s.SaveGroups([]proxy.Group{group}); err != nil {
+		t.Fatalf("SaveGroups() error = %v", err)
+	}
+
+	groups, err := s.Groups()
+	if err != nil {
+		t.Fatalf("Groups() error = %v", err)
+	}
+	if groups[0].Proxies == nil {
+		t.Fatal("Groups() returned nil proxies for an empty group")
+	}
+
+	var persisted []proxy.Group
+	if err := readJSON(filepath.Join(dataDir, "groups.json"), &persisted); err != nil {
+		t.Fatalf("readJSON(groups.json) error = %v", err)
+	}
+	if persisted[0].Proxies == nil {
+		t.Fatal("groups.json stored null instead of an empty proxy list")
+	}
+}
+
 func TestUpdateGroupsAndClearResultsKeepsResultsWithoutClearIDs(t *testing.T) {
 	s, err := NewJSONStore(t.TempDir())
 	if err != nil {

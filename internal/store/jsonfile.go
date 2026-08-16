@@ -305,7 +305,7 @@ func cloneGroups(groups []proxy.Group) []proxy.Group {
 	out := make([]proxy.Group, len(groups))
 	for i, group := range groups {
 		out[i] = group
-		out[i].Proxies = append([]proxy.Proxy(nil), group.Proxies...)
+		out[i].Proxies = append([]proxy.Proxy{}, group.Proxies...)
 	}
 	return out
 }
