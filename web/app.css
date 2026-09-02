@@ -435,7 +435,7 @@ textarea {
 
 table {
   width: 100%;
-  min-width: 1200px;
+  min-width: 1240px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -494,12 +494,16 @@ tr:last-child td {
   width: 80px;
 }
 
+.host-col {
+  width: 300px;
+}
+
 .latency-col {
   width: 100px;
 }
 
 .echo-col {
-  width: 380px;
+  width: 270px;
 }
 
 .actions-col {
