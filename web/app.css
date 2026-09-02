@@ -435,7 +435,8 @@ textarea {
 
 table {
   width: 100%;
-  min-width: 920px;
+  min-width: 1200px;
+  table-layout: fixed;
   border-collapse: collapse;
 }
 
@@ -485,6 +486,26 @@ tr:last-child td {
   padding-right: 4px;
 }
 
+.name-col {
+  width: 90px;
+}
+
+.scheme-col {
+  width: 80px;
+}
+
+.latency-col {
+  width: 100px;
+}
+
+.echo-col {
+  width: 380px;
+}
+
+.actions-col {
+  width: 330px;
+}
+
 .drag-handle {
   display: inline-flex;
   align-items: center;
@@ -525,20 +546,42 @@ tr.drop-after td {
   font-family: Consolas, "Courier New", monospace;
 }
 
+.host-address {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cell-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
 }
 
 .cell-actions button {
   min-height: 28px;
   padding: 0 10px;
+  gap: 4px;
   font-size: 12.5px;
 }
 
+.cell-actions button svg {
+  width: 12px;
+  height: 12px;
+}
+
+.action-divider {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  align-self: center;
+  background: #b8c0cc;
+}
+
 .label-input {
-  width: 150px;
+  width: 100%;
 }
 
 .lat-ok,
@@ -586,14 +629,14 @@ tr.drop-after td {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   max-width: 100%;
 }
 
 .echo-ip {
-  display: inline-flex;
-  align-items: center;
-  max-width: 18ch;
+  display: inline-block;
+  min-width: 0;
+  max-width: 28ch;
   min-height: 0;
   margin: 0;
   padding: 2px 6px;
@@ -603,6 +646,8 @@ tr.drop-after td {
   font-family: Consolas, "Courier New", monospace;
   font-weight: 600;
   letter-spacing: 0.1px;
+  text-align: left;
+  vertical-align: middle;
   border-radius: var(--radius-sm);
   cursor: pointer;
   overflow: hidden;
@@ -623,6 +668,7 @@ tr.drop-after td {
 
 .echo-cc {
   display: inline-flex;
+  flex: none;
   align-items: center;
   padding: 1px 7px;
   border-radius: var(--radius-sm);
@@ -634,6 +680,7 @@ tr.drop-after td {
 }
 
 .echo-asn {
+  flex: none;
   color: var(--muted);
   font-size: 12.5px;
   font-family: Consolas, "Courier New", monospace;

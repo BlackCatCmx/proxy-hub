@@ -291,6 +291,7 @@
     }
     for (const item of group.proxies) {
       const result = state.results[item.id] || {};
+      const address = `${item.host}:${item.port}`;
       const tr = document.createElement("tr");
       tr.dataset.proxyId = item.id;
       tr.innerHTML = `
@@ -298,15 +299,16 @@
         <td class="check"><input type="checkbox" data-select="${escapeHTML(item.id)}"></td>
         <td><input class="label-input" data-label="${escapeHTML(item.id)}" value="${escapeHTML(item.label || "")}" placeholder="—"></td>
         <td>${escapeHTML(item.scheme)}</td>
-        <td class="mono">${escapeHTML(item.host)}:${item.port}</td>
+        <td class="mono host-cell"><span class="host-address" title="${escapeHTML(address)}">${escapeHTML(address)}</span></td>
         <td>${hasPending("latency", result) ? pendingHTML() : latencyHTML(result.latency)}</td>
         <td>${hasPending("echo", result) ? pendingHTML() : echoHTML(result.echo)}</td>
         <td><div class="cell-actions">
           <button class="accent" data-test-latency="${escapeHTML(item.id)}">延迟</button>
           <button class="accent-alt" data-test-echo="${escapeHTML(item.id)}">IP</button>
-          <button class="secondary" data-edit="${escapeHTML(item.id)}">编辑</button>
-          <button class="secondary" data-copy="${escapeHTML(item.id)}">复制</button>
-          <button class="danger" data-delete="${escapeHTML(item.id)}">删除</button>
+          <button class="secondary" data-edit="${escapeHTML(item.id)}"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 13.5 1-3 7-7 2 2-7 7-3 1z"/><path d="m9 5 2 2"/></svg>编辑</button>
+          <button class="secondary" data-copy="${escapeHTML(item.id)}"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="7.5" height="8" rx="1"/><path d="M10 5.5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h1.5"/></svg>复制</button>
+          <span class="action-divider" aria-hidden="true"></span>
+          <button class="danger" data-delete="${escapeHTML(item.id)}"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10"/><path d="M6 4.5V3h4v1.5"/><path d="m4.6 4.5.6 8.6a1 1 0 0 0 1 .9h3.6a1 1 0 0 0 1-.9l.6-8.6"/><path d="M7 7.5v4M9 7.5v4"/></svg>删除</button>
         </div></td>`;
       tbody.appendChild(tr);
     }
@@ -748,7 +750,7 @@
     const tooltip = [result.country, result.region, result.city, result.organization || result.asn_organization, result.source].filter(Boolean).join(" / ");
     const parts = [];
     if (result.echo_ip) {
-      parts.push(`<button type="button" class="echo-ip" data-copy-ip="${escapeHTML(result.echo_ip)}" title="点击复制 IP">${escapeHTML(result.echo_ip)}</button>`);
+      parts.push(`<button type="button" class="echo-ip" data-copy-ip="${escapeHTML(result.echo_ip)}" title="点击复制 IP：${escapeHTML(result.echo_ip)}">${escapeHTML(result.echo_ip)}</button>`);
     }
     if (result.country_code) {
       parts.push(`<span class="echo-cc">${escapeHTML(result.country_code)}</span>`);
