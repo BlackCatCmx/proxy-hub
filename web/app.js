@@ -59,12 +59,6 @@
       await api("./api/auth/logout", { method: "POST" });
       window.location.href = "./login.html";
     });
-    $("#groupSelect").addEventListener("change", async (event) => {
-      state.currentGroupId = event.target.value;
-      state.selected.clear();
-      await loadResults();
-      renderAll();
-    });
     $("#newGroupBtn").addEventListener("click", createGroup);
     $("#renameGroupBtn").addEventListener("click", renameGroup);
     $("#deleteGroupBtn").addEventListener("click", deleteGroup);
@@ -188,12 +182,13 @@
     }
   }
 
-  async function loadResults() {
-    if (!state.currentGroupId) {
+  async function loadResults(groupID = state.currentGroupId) {
+    if (!groupID) {
       state.results = {};
       return;
     }
-    state.results = await api(`./api/results?group_id=${encodeURIComponent(state.currentGroupId)}`);
+    const results = await api(`./api/results?group_id=${encodeURIComponent(groupID)}`);
+    if (groupID === state.currentGroupId) state.results = results;
   }
 
   async function loadSettings() {
@@ -214,19 +209,38 @@
   }
 
   function renderGroups() {
-    const select = $("#groupSelect");
-    select.innerHTML = "";
+    const tabs = $("#groupTabs");
+    tabs.innerHTML = "";
     for (const group of state.groups) {
-      const option = document.createElement("option");
-      option.value = group.id;
-      option.textContent = group.name;
-      select.appendChild(option);
+      const button = document.createElement("button");
+      const active = group.id === state.currentGroupId;
+      button.type = "button";
+      button.className = "group-tab";
+      button.textContent = group.name;
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", String(active));
+      button.classList.toggle("active", active);
+      button.addEventListener("click", () => switchGroup(group.id));
+      tabs.appendChild(button);
     }
-    select.value = state.currentGroupId;
     const hasGroup = Boolean(currentGroup());
     ["renameGroupBtn", "deleteGroupBtn", "bulkProxyBtn", "latencyBtn", "echoBtn", "exportBtn", "copyGroupBtn"].forEach((id) => {
       $("#" + id).disabled = !hasGroup;
     });
+  }
+
+  async function switchGroup(groupID) {
+    if (groupID === state.currentGroupId) return;
+    state.currentGroupId = groupID;
+    state.selected.clear();
+    state.results = {};
+    renderAll();
+    try {
+      await loadResults(groupID);
+      if (groupID === state.currentGroupId) renderAll();
+    } catch (error) {
+      if (groupID === state.currentGroupId) showNotice(error.message || "加载分组失败", true);
+    }
   }
 
   function renderSummary() {
@@ -363,6 +377,8 @@
     const group = await api("./api/groups", { method: "POST", body: { name } });
     state.groups.push(group);
     state.currentGroupId = group.id;
+    state.selected.clear();
+    state.results = {};
     renderAll();
   }
 

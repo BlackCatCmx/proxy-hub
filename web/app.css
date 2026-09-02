@@ -334,16 +334,64 @@ textarea {
 }
 
 .group-row,
+.group-actions,
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.toolbar {
+  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 
-.group-row select {
-  min-width: 220px;
+.group-row {
+  overflow-x: auto;
+  margin-bottom: 12px;
+  scrollbar-width: none;
+}
+
+.group-row::-webkit-scrollbar {
+  display: none;
+}
+
+.group-actions {
+  flex: none;
+  margin-left: 24px;
+  padding-left: 24px;
+  border-left: 2px solid #b8c0cc;
+}
+
+.group-label {
+  flex: none;
+}
+
+.group-tabs {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.group-tab {
+  flex: none;
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--line);
+  white-space: nowrap;
+}
+
+.group-tab:hover {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+
+.group-tab.active,
+.group-tab.active:hover {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .summary {
