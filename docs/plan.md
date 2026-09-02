@@ -47,8 +47,8 @@ proxy-hub/
 │   │   └── parser.go               # 多格式解析（见下）
 │   ├── prober/                     # 协议探测器，可拓展
 │   │   ├── prober.go               # interface Prober{Probe(ctx, p) Result}
-│   │   ├── socks5.go               # 当前实现
-│   │   ├── http.go                 # 占位 TODO
+│   │   ├── socks5.go               # SOCKS5/SOCKS5H 代理实现
+│   │   ├── http.go                 # HTTP/HTTPS 代理实现
 │   │   └── registry.go             # scheme -> Prober
 │   ├── tester/
 │   │   ├── tester.go               # 延迟测试 worker pool
@@ -227,7 +227,9 @@ type EchoResult struct {
 - 如果第二段和第四段都像端口，该行存在歧义，返回解析失败并提示改用 `user:pass@host:port` 或 `socks5://user:pass@host:port`。
 - 管理代理保存时按 `scheme+host+port+user+pass` 精确去重；保存后不保留未出现在输入中的旧代理。
 
-## 探测器（socks5.go 核心思路）
+## 探测器
+
+SOCKS5/SOCKS5H 核心流程：
 
 ```
 Probe(ctx, p):
@@ -252,6 +254,11 @@ DNS 规则：
 - `socks5h://` 把测试 URL 域名通过 `ATYP=0x03` 发给代理，由代理服务器解析。
 - 两种模式严格区分，不做自动回退；失败结果中保留明确错误。
 - 测试结果中标记 `dns_mode=local|remote|ip`，便于识别实际连接方式。
+
+HTTP/HTTPS 代理使用标准库 `net/http.Transport`：
+- `http://` 代理通过明文连接代理服务器，`https://` 代理先与代理服务器建立 TLS 连接并校验证书。
+- HTTP 测试 URL 使用代理请求格式；HTTPS 测试 URL 通过 `CONNECT` 建立隧道后校验目标站点 TLS 证书。
+- URL 中的用户名和密码作为 `Proxy-Authorization` 发送；请求、TLS 握手和响应头均受单代理超时约束。
 
 IP 回显测试独立执行：
 ```
@@ -476,6 +483,5 @@ ENTRYPOINT ["/proxy-hub"]
 
 ## 拓展点（仅留接口，不实现）
 
-- `prober.Prober` 新增 http/https 实现 → 注册 scheme。
 - 对外代理端口/API 转发不创建占位目录；真正需要时再新增 `internal/forward/`。
 - store 后续可换 SQLite：实现同一 `Store` 接口即可，API 层零改动。

@@ -18,8 +18,8 @@ func NewDefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register("socks5", Socks5Prober{})
 	r.Register("socks5h", Socks5Prober{})
-	r.Register("http", UnsupportedProber{Scheme: "http"})
-	r.Register("https", UnsupportedProber{Scheme: "https"})
+	r.Register("http", HTTPProber{})
+	r.Register("https", HTTPProber{})
 	return r
 }
 

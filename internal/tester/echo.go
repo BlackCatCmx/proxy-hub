@@ -22,15 +22,15 @@ type echoSource struct {
 func (t *Tester) Echo(ctx context.Context, p proxy.Proxy, settings config.Settings) proxy.EchoResult {
 	result := proxy.EchoResult{TestedAt: time.Now()}
 	switch proxy.CanonicalScheme(p.Scheme) {
-	case "socks5", "socks5h":
+	case "socks5", "socks5h", "http", "https":
 	default:
-		result.Error = "IP echo is implemented for socks5 and socks5h proxies only"
+		result.Error = "IP echo is not supported for this proxy scheme"
 		return result
 	}
 	timeout := echoSourceTimeout(time.Duration(settings.TimeoutMs) * time.Millisecond)
 	var lastErr error
 	for _, source := range echoSources() {
-		status, body, _, err := prober.FetchThroughSOCKS5(ctx, p, source.url, timeout)
+		status, body, _, err := prober.FetchThroughProxy(ctx, p, source.url, timeout)
 		if err != nil {
 			lastErr = err
 			continue

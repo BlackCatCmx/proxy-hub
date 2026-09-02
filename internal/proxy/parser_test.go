@@ -15,6 +15,8 @@ func TestParseSupportedFormats(t *testing.T) {
 		{name: "url no auth", input: "socks5://1.2.3.4:1080", host: "1.2.3.4", port: 1080, scheme: "socks5"},
 		{name: "url auth", input: "socks5://user:pass@example.com:1080", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5"},
 		{name: "url socks5h", input: "socks5h://user:pass@example.com:1080", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5h"},
+		{name: "url http", input: "http://user:pass@example.com:8080", host: "example.com", port: 8080, user: "user", pass: "pass", scheme: "http"},
+		{name: "url https", input: "https://example.com:8443", host: "example.com", port: 8443, scheme: "https"},
 		{name: "user pass at host", input: "user:pass@example.com:1080", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5"},
 		{name: "host at user pass", input: "example.com:1080@user:pass", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5"},
 		{name: "host port user pass", input: "example.com:1080:user:pass", host: "example.com", port: 1080, user: "user", pass: "pass", scheme: "socks5"},
