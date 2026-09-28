@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,12 @@ func (t *Tester) Echo(ctx context.Context, p proxy.Proxy, settings config.Settin
 		return result
 	}
 	timeout := echoSourceTimeout(time.Duration(settings.TimeoutMs) * time.Millisecond)
+	if parsed, ok := t.echoIPv4(ctx, p, timeout); ok {
+		return parsed
+	}
+
 	var lastErr error
+	var ipv6Fallback *proxy.EchoResult
 	for _, source := range echoSources() {
 		status, body, _, err := prober.FetchThroughProxy(ctx, p, source.url, timeout)
 		if err != nil {
@@ -44,10 +50,24 @@ func (t *Tester) Echo(ctx context.Context, p proxy.Proxy, settings config.Settin
 			lastErr = err
 			continue
 		}
+		ip := net.ParseIP(parsed.EchoIP)
+		if ip == nil {
+			lastErr = errors.New("echo source returned an invalid IP")
+			continue
+		}
 		parsed.OK = true
 		parsed.Source = source.name
 		parsed.TestedAt = time.Now()
-		return parsed
+		if ipv4 := ip.To4(); ipv4 != nil {
+			parsed.EchoIP = ipv4.String()
+			return parsed
+		}
+		if ipv6Fallback == nil {
+			ipv6Fallback = &parsed
+		}
+	}
+	if ipv6Fallback != nil {
+		return *ipv6Fallback
 	}
 	if lastErr != nil {
 		result.Error = lastErr.Error()
@@ -55,6 +75,42 @@ func (t *Tester) Echo(ctx context.Context, p proxy.Proxy, settings config.Settin
 		result.Error = "all IP echo sources failed"
 	}
 	return result
+}
+
+func (t *Tester) echoIPv4(ctx context.Context, p proxy.Proxy, timeout time.Duration) (proxy.EchoResult, bool) {
+	status, body, _, err := prober.FetchThroughProxy(ctx, p, "https://api-ipv4.ip.sb/ip", timeout)
+	if err != nil || status < 200 || status > 299 {
+		return proxy.EchoResult{}, false
+	}
+	ip := net.ParseIP(strings.TrimSpace(string(body)))
+	if ip == nil || ip.To4() == nil {
+		return proxy.EchoResult{}, false
+	}
+	ipv4 := ip.To4().String()
+	result := proxy.EchoResult{
+		OK:       true,
+		EchoIP:   ipv4,
+		Source:   "ip.sb",
+		TestedAt: time.Now(),
+	}
+
+	status, body, _, err = prober.FetchThroughProxy(ctx, p, "https://api.ip.sb/geoip/"+ipv4, timeout)
+	if err != nil || status < 200 || status > 299 {
+		return result, true
+	}
+	geolocation, err := parseIPSB(body)
+	if err != nil {
+		return result, true
+	}
+	geolocationIP := net.ParseIP(geolocation.EchoIP)
+	if geolocationIP == nil || !geolocationIP.Equal(ip) {
+		return result, true
+	}
+	geolocation.OK = true
+	geolocation.EchoIP = ipv4
+	geolocation.Source = "ip.sb"
+	geolocation.TestedAt = time.Now()
+	return geolocation, true
 }
 
 func echoSourceTimeout(timeout time.Duration) time.Duration {
